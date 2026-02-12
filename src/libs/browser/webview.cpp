@@ -1,25 +1,6 @@
-/****************************************************************************
-**
-** Copyright (C) 2015-2016 Oleg Shparber
-** Copyright (C) 2013-2014 Jerzy Kozera
-** Contact: https://go.zealdocs.org/l/contact
-**
-** This file is part of Zeal.
-**
-** Zeal is free software: you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation, either version 3 of the License, or
-** (at your option) any later version.
-**
-** Zeal is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
-**
-** You should have received a copy of the GNU General Public License
-** along with Zeal. If not, see <https://www.gnu.org/licenses/>.
-**
-****************************************************************************/
+// Copyright (C) Oleg Shparber, et al. <https://zealdocs.org>
+// Copyright (C) 2013-2014 Jerzy Kozera
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "webview.h"
 
@@ -27,7 +8,6 @@
 #include "webpage.h"
 
 #include <core/application.h>
-#include <core/networkaccessmanager.h>
 #include <core/settings.h>
 #include <ui/browsertab.h>
 #include <ui/mainwindow.h>
@@ -39,9 +19,15 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QVector>
-#include <QWebEngineContextMenuData>
 #include <QWebEngineProfile>
+#include <QWebEngineSettings>
 #include <QWheelEvent>
+
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+#include <QWebEngineContextMenuData>
+#else
+#include <QWebEngineContextMenuRequest>
+#endif
 
 using namespace Zeal::Browser;
 
@@ -50,6 +36,11 @@ WebView::WebView(QWidget *parent)
 {
     setPage(new WebPage(this));
     setZoomLevel(defaultZoomLevel());
+
+    // Enable plugins for PDF support.
+    settings()->setAttribute(QWebEngineSettings::PluginsEnabled, true);
+
+    settings()->setAttribute(QWebEngineSettings::FocusOnNavigationEnabled, false);
 
     QApplication::instance()->installEventFilter(this);
 }
@@ -114,13 +105,20 @@ QWebEngineView *WebView::createWindow(QWebEnginePage::WebWindowType type)
 
 void WebView::contextMenuEvent(QContextMenuEvent *event)
 {
-    QWebEnginePage *p = page();
-    const QWebEngineContextMenuData& contextData = p->contextMenuData();
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+    const QWebEngineContextMenuData& contextData = page()->contextMenuData();
 
     if (!contextData.isValid()) {
         QWebEngineView::contextMenuEvent(event);
         return;
     }
+#else
+    QWebEngineContextMenuRequest *contextMenuRequest = lastContextMenuRequest();
+    if (contextMenuRequest == nullptr) {
+        QWebEngineView::contextMenuEvent(event);
+        return;
+    }
+#endif
 
     event->accept();
 
@@ -130,7 +128,12 @@ void WebView::contextMenuEvent(QContextMenuEvent *event)
 
     m_contextMenu = new QMenu(this);
 
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     QUrl linkUrl = contextData.linkUrl();
+#else
+    QUrl linkUrl = contextMenuRequest->linkUrl();
+#endif
+
     if (linkUrl.isValid()) {
         const QString scheme = linkUrl.scheme();
 
@@ -151,7 +154,13 @@ void WebView::contextMenuEvent(QContextMenuEvent *event)
         }
     }
 
+
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     const QString selectedText = contextData.selectedText();
+#else
+    const QString selectedText = contextMenuRequest->selectedText();
+#endif
+
     if (!selectedText.isEmpty()) {
         if (!m_contextMenu->isEmpty()) {
             m_contextMenu->addSeparator();
@@ -181,16 +190,23 @@ void WebView::contextMenuEvent(QContextMenuEvent *event)
     m_contextMenu->popup(event->globalPos());
 }
 
-bool WebView::handleMousePressEvent(QMouseEvent *event)
+bool WebView::handleMouseReleaseEvent(QMouseEvent *event)
 {
     switch (event->button()) {
     case Qt::BackButton:
-        back();
+        // Check if cursor is still inside webview.
+        if (rect().contains(event->pos())) {
+            back();
+        }
+
         event->accept();
         return true;
 
     case Qt::ForwardButton:
-        forward();
+        if (rect().contains(event->pos())) {
+            forward();
+        }
+
         event->accept();
         return true;
 
@@ -226,8 +242,8 @@ bool WebView::eventFilter(QObject *watched, QEvent *event)
 {
     if (watched->parent() == this) {
         switch (event->type()) {
-        case QEvent::MouseButtonPress:
-            if (handleMousePressEvent(static_cast<QMouseEvent *>(event))) {
+        case QEvent::MouseButtonRelease:
+            if (handleMouseReleaseEvent(static_cast<QMouseEvent *>(event))) {
                 return true;
             }
 

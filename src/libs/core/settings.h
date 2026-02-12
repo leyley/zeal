@@ -1,24 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2015-2016 Oleg Shparber
-** Contact: https://go.zealdocs.org/l/contact
-**
-** This file is part of Zeal.
-**
-** Zeal is free software: you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation, either version 3 of the License, or
-** (at your option) any later version.
-**
-** Zeal is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
-**
-** You should have received a copy of the GNU General Public License
-** along with Zeal. If not, see <https://www.gnu.org/licenses/>.
-**
-****************************************************************************/
+// Copyright (C) Oleg Shparber, et al. <https://zealdocs.org>
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 #ifndef ZEAL_CORE_SETTINGS_H
 #define ZEAL_CORE_SETTINGS_H
@@ -35,7 +16,7 @@ namespace Core {
 class Settings final : public QObject
 {
     Q_OBJECT
-    Q_DISABLE_COPY(Settings)
+    Q_DISABLE_COPY_MOVE(Settings)
 public:
     /* This public members are here just for simplification and should go away
      * once a more advanced settings management come in place.
@@ -44,6 +25,7 @@ public:
     // Startup
     bool startMinimized;
     bool checkForUpdate;
+    bool hideMenuBar;
     // TODO: bool restoreLastState;
 
     // System Tray
@@ -59,7 +41,7 @@ public:
     bool openNewTabAfterActive;
 
     // Search
-    bool fuzzySearchEnabled;
+    bool isFuzzySearchEnabled;
 
     // Content
     QString defaultFontFamily;
@@ -79,8 +61,15 @@ public:
     Q_ENUM(ExternalLinkPolicy)
     ExternalLinkPolicy externalLinkPolicy = ExternalLinkPolicy::Ask;
 
-    bool darkModeEnabled;
-    bool highlightOnNavigateEnabled;
+    enum class ContentAppearance : unsigned int {
+        Automatic = 0,
+        Light,
+        Dark
+    };
+    Q_ENUM(ContentAppearance)
+    ContentAppearance contentAppearance = ContentAppearance::Automatic;
+
+    bool isHighlightOnNavigateEnabled;
     QString customCssFile;
     bool isSmoothScrollingEnabled;
 
@@ -95,8 +84,8 @@ public:
 
     // Internal
     // --------
-    // InstallId is a UUID used to indentify a Zeal installation. Created on first start or after
-    // a settings wipe. It is not attached to user hardware or software, and is sent exclusevely
+    // InstallId is a UUID used to identify a Zeal installation. Created on first start or after
+    // a settings wipe. It is not attached to user hardware or software, and is sent exclusively
     // to *.zealdocs.org hosts.
     QString installId;
 
@@ -106,6 +95,7 @@ public:
     bool proxyAuthenticate;
     QString proxyUserName;
     QString proxyPassword;
+    bool isIgnoreSslErrorsEnabled;
 
     // Other
     QString docsetPath;
@@ -117,6 +107,21 @@ public:
 
     explicit Settings(QObject *parent = nullptr);
     ~Settings() override;
+
+    // Helper functions.
+    bool isDarkModeEnabled() const;
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+    typedef Qt::ColorScheme ColorScheme;
+#else
+    enum class ColorScheme {
+        Unknown,
+        Light,
+        Dark,
+    };
+#endif
+
+    static ColorScheme colorScheme();
 
 public slots:
     void load();
@@ -134,9 +139,13 @@ private:
 } // namespace Core
 } // namespace Zeal
 
+QDataStream &operator<<(QDataStream &out, Zeal::Core::Settings::ContentAppearance policy);
+QDataStream &operator>>(QDataStream &in, Zeal::Core::Settings::ContentAppearance &policy);
+
 QDataStream &operator<<(QDataStream &out, Zeal::Core::Settings::ExternalLinkPolicy policy);
 QDataStream &operator>>(QDataStream &in, Zeal::Core::Settings::ExternalLinkPolicy &policy);
 
+Q_DECLARE_METATYPE(Zeal::Core::Settings::ContentAppearance)
 Q_DECLARE_METATYPE(Zeal::Core::Settings::ExternalLinkPolicy)
 
 #endif // ZEAL_CORE_SETTINGS_H

@@ -1,25 +1,6 @@
-/****************************************************************************
-**
-** Copyright (C) 2015-2016 Oleg Shparber
-** Copyright (C) 2013-2014 Jerzy Kozera
-** Contact: https://go.zealdocs.org/l/contact
-**
-** This file is part of Zeal.
-**
-** Zeal is free software: you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation, either version 3 of the License, or
-** (at your option) any later version.
-**
-** Zeal is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
-**
-** You should have received a copy of the GNU General Public License
-** along with Zeal. If not, see <https://www.gnu.org/licenses/>.
-**
-****************************************************************************/
+// Copyright (C) Oleg Shparber, et al. <https://zealdocs.org>
+// Copyright (C) 2013-2014 Jerzy Kozera
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "docsetlistitemdelegate.h"
 
@@ -48,10 +29,16 @@ void DocsetListItemDelegate::paint(QPainter *painter,
         return;
     }
 
+    if (index.column() != Registry::SectionIndex::Actions) {
+        QStyledItemDelegate::paint(painter, option, index);
+        return;
+    }
+
     QStyledItemDelegate::paint(painter, option, index);
 
-    if (!index.model()->data(index, Registry::ItemDataRole::UpdateAvailableRole).toBool())
+    if (!index.model()->data(index, Registry::ItemDataRole::UpdateAvailableRole).toBool()) {
         return;
+    }
 
     const QString text = tr("Update available");
 
@@ -59,20 +46,22 @@ void DocsetListItemDelegate::paint(QPainter *painter,
     font.setItalic(true);
 
     const QFontMetrics fontMetrics(font);
+    const int margin = 4; // Random small number
 
-    QRect textRect = option.rect;
-#if QT_VERSION >= QT_VERSION_CHECK(5, 11, 0)
+    QRect textRect = option.rect.adjusted(-margin, 0, -margin, 0);
     textRect.setLeft(textRect.right() - fontMetrics.horizontalAdvance(text) - 2);
-#else
-    textRect.setLeft(textRect.right() - fontMetrics.width(text) - 2);
-#endif
+    textRect = QStyle::visualRect(option.direction, option.rect, textRect);
+    // Constant LeftToRight because we don't need to flip it any further.
+    // Vertically align the text in the middle to match QCommonStyle behavior.
+    const auto alignedRect = QStyle::alignedRect(Qt::LeftToRight, option.displayAlignment,
+                                                 QSize(textRect.size().width(), fontMetrics.height()), textRect);
 
     painter->save();
 
     QPalette palette = option.palette;
 
-#ifdef Q_OS_WIN32
-    // QWindowsVistaStyle overrides highlight colour.
+#ifdef Q_OS_WINDOWS
+    // QWindowsVistaStyle overrides highlight color.
     if (option.widget->style()->objectName() == QLatin1String("windowsvista")) {
         palette.setColor(QPalette::All, QPalette::HighlightedText,
                          palette.color(QPalette::Active, QPalette::Text));
@@ -89,7 +78,7 @@ void DocsetListItemDelegate::paint(QPainter *painter,
     }
 
     painter->setFont(font);
-    painter->drawText(textRect, text);
+    painter->drawText(alignedRect, text);
 
     painter->restore();
 }

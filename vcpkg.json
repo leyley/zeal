@@ -1,0 +1,17 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "builtin-baseline": "120deac3062162151622ca4860575a33844ba10b",
+  "dependencies": [
+    {
+      "name": "cpp-httplib",
+      "default-features": false
+    },
+    {
+      "name": "libarchive",
+      "default-features": false
+    },
+    "openssl",
+    "sqlite3",
+    "vulkan-headers"
+  ]
+}

@@ -1,3 +1,6 @@
+// Copyright (C) Oleg Shparber, et al. <https://zealdocs.org>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #ifndef ZEAL_WIDGETUI_TOOLBARFRAME_H
 #define ZEAL_WIDGETUI_TOOLBARFRAME_H
 

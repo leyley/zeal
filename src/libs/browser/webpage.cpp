@@ -1,25 +1,6 @@
-/****************************************************************************
-**
-** Copyright (C) 2020 Oleg Shparber
-** Copyright (C) 2019 Kay Gawlik
-** Contact: https://go.zealdocs.org/l/contact
-**
-** This file is part of Zeal.
-**
-** Zeal is free software: you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation, either version 3 of the License, or
-** (at your option) any later version.
-**
-** Zeal is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
-**
-** You should have received a copy of the GNU General Public License
-** along with Zeal. If not, see <https://www.gnu.org/licenses/>.
-**
-****************************************************************************/
+// Copyright (C) Oleg Shparber, et al. <https://zealdocs.org>
+// Copyright (C) 2019 Kay Gawlik
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "webpage.h"
 
@@ -126,10 +107,15 @@ bool WebPage::acceptNavigationRequest(const QUrl &requestUrl, QWebEnginePage::Na
     return false;
 }
 
-void WebPage::javaScriptConsoleMessage(QWebEnginePage::JavaScriptConsoleMessageLevel level, const QString &message, int lineNumber, const QString &sourceId)
+void WebPage::javaScriptConsoleMessage(QWebEnginePage::JavaScriptConsoleMessageLevel level,
+                                       const QString &message,
+                                       int lineNumber,
+                                       const QString &sourceId)
 {
-    Q_UNUSED(level)
-    Q_UNUSED(message)
-    Q_UNUSED(lineNumber)
-    Q_UNUSED(sourceId)
+    qCDebug(log,
+            "%s [%s:%d] %s",
+            qPrintable(QVariant::fromValue(level).toString()),
+            qPrintable(sourceId),
+            lineNumber,
+            qPrintable(message));
 }

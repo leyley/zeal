@@ -1,3 +1,6 @@
+// Copyright (C) Oleg Shparber, et al. <https://zealdocs.org>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #ifndef ZEAL_REGISTRY_ITEMDATAROLE_H
 #define ZEAL_REGISTRY_ITEMDATAROLE_H
 
@@ -11,6 +14,12 @@ enum ItemDataRole {
     DocsetNameRole,
     UpdateAvailableRole,
     UrlRole
+};
+
+enum SectionIndex {
+    Name,
+    SearchPrefix,
+    Actions
 };
 
 } // namespace Registry

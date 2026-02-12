@@ -1,25 +1,6 @@
-/****************************************************************************
-**
-** Copyright (C) 2015-2016 Oleg Shparber
-** Copyright (C) 2013-2014 Jerzy Kozera
-** Contact: https://go.zealdocs.org/l/contact
-**
-** This file is part of Zeal.
-**
-** Zeal is free software: you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation, either version 3 of the License, or
-** (at your option) any later version.
-**
-** Zeal is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
-**
-** You should have received a copy of the GNU General Public License
-** along with Zeal. If not, see <https://www.gnu.org/licenses/>.
-**
-****************************************************************************/
+// Copyright (C) Oleg Shparber, et al. <https://zealdocs.org>
+// Copyright (C) 2013-2014 Jerzy Kozera
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "searchitemdelegate.h"
 
@@ -100,14 +81,18 @@ void SearchItemDelegate::paint(QPainter *painter, const QStyleOptionViewItem &op
 
         // All icons are sized after the first one.
         QRect iconRect = style->subElementRect(QStyle::SE_ItemViewItemDecoration, &opt, opt.widget);
+        // Undo RTL mirroring
+        iconRect = style->visualRect(opt.direction, opt.rect, iconRect);
         const int dx = iconRect.width() + margin;
 
         for (int i = 1; i < roles.size(); ++i) {
             opt.decorationSize.rwidth() += dx;
             iconRect.translate(dx, 0);
+            // Redo RTL mirroring
+            const auto iconVisualRect = style->visualRect(opt.direction, opt.rect, iconRect);
 
             const QIcon icon = index.data(roles[i]).value<QIcon>();
-            icon.paint(painter, iconRect, opt.decorationAlignment, mode, state);
+            icon.paint(painter, iconVisualRect, opt.decorationAlignment, mode, state);
         }
     }
 
@@ -115,7 +100,7 @@ void SearchItemDelegate::paint(QPainter *painter, const QStyleOptionViewItem &op
     if (index.data().isNull())
         return;
 
-    // Match QCommonStyle behaviour.
+    // Match QCommonStyle behavior.
     opt.features |= QStyleOptionViewItem::HasDisplay;
     opt.text = index.data().toString();
     const QRect textRect = style->subElementRect(QStyle::SE_ItemViewItemText, &opt, opt.widget)
@@ -137,13 +122,8 @@ void SearchItemDelegate::paint(QPainter *painter, const QStyleOptionViewItem &op
             if (matchIndex == -1 || matchIndex >= elidedText.length() - 1)
                 break;
 
-#if QT_VERSION >= QT_VERSION_CHECK(5, 11, 0)
             QRect highlightRect = textRect.adjusted(fm.horizontalAdvance(elidedText.left(matchIndex)), 2, 0, -2);
             highlightRect.setWidth(fm.horizontalAdvance(elidedText.mid(matchIndex, m_highlight.length())));
-#else
-            QRect highlightRect = textRect.adjusted(fm.width(elidedText.left(matchIndex)), 2, 0, -2);
-            highlightRect.setWidth(fm.width(elidedText.mid(matchIndex, m_highlight.length())));
-#endif
 
             QPainterPath path;
             path.addRoundedRect(highlightRect, 2, 2);
@@ -159,8 +139,8 @@ void SearchItemDelegate::paint(QPainter *painter, const QStyleOptionViewItem &op
 
     painter->save();
 
-#ifdef Q_OS_WIN32
-    // QWindowsVistaStyle overrides highlight colour.
+#ifdef Q_OS_WINDOWS
+    // QWindowsVistaStyle overrides highlight color.
     if (style->objectName() == QLatin1String("windowsvista")) {
         opt.palette.setColor(QPalette::All, QPalette::HighlightedText,
                              opt.palette.color(QPalette::Active, QPalette::Text));
@@ -175,10 +155,13 @@ void SearchItemDelegate::paint(QPainter *painter, const QStyleOptionViewItem &op
     else
         painter->setPen(opt.palette.color(cg, QPalette::Text));
 
+    // Constant LeftToRight because we don't need to flip it any further.
     // Vertically align the text in the middle to match QCommonStyle behaviour.
-    const QRect alignedRect = QStyle::alignedRect(opt.direction, opt.displayAlignment,
-                                                  QSize(1, fm.height()), textRect);
-    painter->drawText(QPoint(alignedRect.x(), alignedRect.y() + fm.ascent()), elidedText);
+    const auto alignedRect = QStyle::alignedRect(Qt::LeftToRight, opt.displayAlignment,
+                                                 QSize(textRect.size().width(), fm.height()), textRect);
+    const auto textPoint = QPoint(alignedRect.x(), alignedRect.y() + fm.ascent());
+    // Force LTR, so that BiDi won't reorder ellipsis to the left.
+    painter->drawText(textPoint, elidedText, Qt::TextFlag::TextForceLeftToRight, 0);
     painter->restore();
 }
 
@@ -207,11 +190,9 @@ QSize SearchItemDelegate::sizeHint(const QStyleOptionViewItem &option,
         const int decorationWidth = std::min(opt.decorationSize.width(), actualSize.width());
         size.rwidth() = (decorationWidth + margin) * roles.size() + margin;
     }
-#if QT_VERSION >= QT_VERSION_CHECK(5, 11, 0)
+
     size.rwidth() += opt.fontMetrics.horizontalAdvance(index.data().toString()) + margin * 2;
-#else
-    size.rwidth() += opt.fontMetrics.width(index.data().toString()) + margin * 2;
-#endif
+
     return size;
 }
 

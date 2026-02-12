@@ -1,25 +1,6 @@
-/****************************************************************************
-**
-** Copyright (C) 2015-2016 Oleg Shparber
-** Copyright (C) 2013-2014 Jerzy Kozera
-** Contact: https://go.zealdocs.org/l/contact
-**
-** This file is part of Zeal.
-**
-** Zeal is free software: you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation, either version 3 of the License, or
-** (at your option) any later version.
-**
-** Zeal is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
-**
-** You should have received a copy of the GNU General Public License
-** along with Zeal. If not, see <https://www.gnu.org/licenses/>.
-**
-****************************************************************************/
+// Copyright (C) Oleg Shparber, et al. <https://zealdocs.org>
+// Copyright (C) 2013-2014 Jerzy Kozera
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "docsetregistry.h"
 
@@ -32,13 +13,17 @@
 #include <core/httpserver.h>
 
 #include <QDir>
+#include <QLoggingCategory>
 #include <QThread>
 
 #include <QtConcurrent>
 
 #include <functional>
+#include <future>
 
 using namespace Zeal::Registry;
+
+static Q_LOGGING_CATEGORY(log, "zeal.registry.docsetregistry")
 
 void MergeQueryResults(QList<SearchResult> &finalResult, const QList<SearchResult> &partial)
 {
@@ -89,18 +74,18 @@ void DocsetRegistry::setStoragePath(const QString &path)
 
 bool DocsetRegistry::isFuzzySearchEnabled() const
 {
-    return m_fuzzySearchEnabled;
+    return m_isFuzzySearchEnabled;
 }
 
 void DocsetRegistry::setFuzzySearchEnabled(bool enabled)
 {
-    if (enabled == m_fuzzySearchEnabled) {
+    if (enabled == m_isFuzzySearchEnabled) {
         return;
     }
 
-    m_fuzzySearchEnabled = enabled;
+    m_isFuzzySearchEnabled = enabled;
 
-    for (Docset *docset : qAsConst(m_docsets)) {
+    for (Docset *docset : std::as_const(m_docsets)) {
         docset->setFuzzySearchEnabled(enabled);
     }
 }
@@ -122,45 +107,41 @@ QStringList DocsetRegistry::names() const
 
 void DocsetRegistry::loadDocset(const QString &path)
 {
-    auto watcher = new QFutureWatcher<Docset *>();
-    connect(watcher, &QFutureWatcher<Docset *>::finished, this, [this, watcher] {
-        QScopedPointer<QFutureWatcher<Docset *>, QScopedPointerDeleteLater> guard(watcher);
-
-        Docset *docset = watcher->result();
-        // TODO: Emit error
-        if (!docset->isValid()) {
-            qWarning("Could not load docset from '%s'. Reinstall the docset.",
-                     qPrintable(docset->path()));
-            delete docset;
-            return;
-        }
-
-        docset->setFuzzySearchEnabled(m_fuzzySearchEnabled);
-
-        const QString name = docset->name();
-        if (m_docsets.contains(name)) {
-            unloadDocset(name);
-        }
-
-        // Setup HTTP mount.
-        QUrl url = Core::Application::instance()->httpServer()->mount(name, docset->documentPath());
-        if (url.isEmpty()) {
-            qWarning("Could not enable docset from '%s'. Reinstall the docset.",
-                     qPrintable(docset->path()));
-            delete docset;
-            return;
-        }
-
-        docset->setBaseUrl(url);
-
-        m_docsets[name] = docset;
-
-        emit docsetLoaded(name);
+    std::future<Docset *> f = std::async(std::launch::async, [path](){
+        return new Docset(path);
     });
 
-    watcher->setFuture(QtConcurrent::run([path] {
-        return new Docset(path);
-    }));
+    f.wait();
+    Docset *docset = f.get();
+    // TODO: Emit error
+    if (!docset->isValid()) {
+        qCWarning(log, "Could not load docset '%s' from '%s'. Reinstall the docset.",
+                  qPrintable(docset->name()), qPrintable(docset->path()));
+        delete docset;
+        return;
+    }
+
+    docset->setFuzzySearchEnabled(m_isFuzzySearchEnabled);
+
+    const QString name = docset->name();
+    if (m_docsets.contains(name)) {
+        unloadDocset(name);
+    }
+
+    // Setup HTTP mount.
+    QUrl url = Core::Application::instance()->httpServer()->mount(name, docset->documentPath());
+    if (url.isEmpty()) {
+        qCWarning(log, "Could not enable docset '%s' from '%s'. Reinstall the docset.",
+                  qPrintable(docset->name()), qPrintable(docset->path()));
+        delete docset;
+        return;
+    }
+
+    docset->setBaseUrl(url);
+
+    m_docsets[name] = docset;
+
+    emit docsetLoaded(name);
 }
 
 void DocsetRegistry::unloadDocset(const QString &name)
@@ -188,12 +169,15 @@ Docset *DocsetRegistry::docset(int index) const
 {
     if (index < 0 || index >= m_docsets.size())
         return nullptr;
-    return (m_docsets.cbegin() + index).value();
+
+    auto it = m_docsets.cbegin();
+    std::advance(it, index);
+    return *it;
 }
 
 Docset *DocsetRegistry::docsetForUrl(const QUrl &url)
 {
-    for (Docset *docset : qAsConst(m_docsets)) {
+    for (Docset *docset : std::as_const(m_docsets)) {
         if (docset->baseUrl().isParentOf(url))
             return docset;
     }
@@ -226,7 +210,7 @@ void DocsetRegistry::_runQuery(const QString &query)
 
     const SearchQuery searchQuery = SearchQuery::fromString(query);
     if (searchQuery.hasKeywords()) {
-        for (Docset *docset : qAsConst(m_docsets)) {
+        for (Docset *docset : std::as_const(m_docsets)) {
             if (searchQuery.hasKeywords(docset->keywords()))
                 enabledDocsets << docset;
         }

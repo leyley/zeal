@@ -1,28 +1,10 @@
-/****************************************************************************
-**
-** Copyright (C) 2015-2016 Oleg Shparber
-** Contact: https://go.zealdocs.org/l/contact
-**
-** This file is part of Zeal.
-**
-** Zeal is free software: you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation, either version 3 of the License, or
-** (at your option) any later version.
-**
-** Zeal is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
-**
-** You should have received a copy of the GNU General Public License
-** along with Zeal. If not, see <https://www.gnu.org/licenses/>.
-**
-****************************************************************************/
+// Copyright (C) Oleg Shparber, et al. <https://zealdocs.org>
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "extractor.h"
 
 #include <QDir>
+#include <QLoggingCategory>
 
 #include <archive.h>
 #include <archive_entry.h>
@@ -30,6 +12,8 @@
 #include <sys/stat.h>
 
 using namespace Zeal::Core;
+
+static Q_LOGGING_CATEGORY(log, "zeal.core.extractor")
 
 Extractor::Extractor(QObject *parent)
     : QObject(parent)
@@ -51,6 +35,8 @@ void Extractor::extract(const QString &sourceFile, const QString &destination, c
     int r = archive_read_open_filename(info.archiveHandle, qPrintable(sourceFile), 10240);
     if (r) {
         emit error(sourceFile, QString::fromLocal8Bit(archive_error_string(info.archiveHandle)));
+        archive_read_free(info.archiveHandle);
+
         return;
     }
 
@@ -65,12 +51,8 @@ void Extractor::extract(const QString &sourceFile, const QString &destination, c
     // TODO: Do not strip root directory in archive if it equals to 'root'
     archive_entry *entry;
     while (archive_read_next_header(info.archiveHandle, &entry) == ARCHIVE_OK) {
-#ifndef Q_OS_WIN32
-        QString pathname = QString::fromUtf8(archive_entry_pathname(entry));
-#else
-        // TODO: Remove once https://github.com/libarchive/libarchive/issues/587 is resolved.
-        QString pathname = QString::fromWCharArray(archive_entry_pathname_w(entry));
-#endif
+        // See https://github.com/libarchive/libarchive/issues/587 for more on UTF-8.
+        QString pathname = QString::fromUtf8(archive_entry_pathname_utf8(entry));
 
         if (!root.isEmpty()) {
             pathname.remove(0, pathname.indexOf(QLatin1String("/")) + 1);
@@ -85,13 +67,13 @@ void Extractor::extract(const QString &sourceFile, const QString &destination, c
         }
 
         if (filetype != S_IFREG) {
-            qWarning("Unsupported filetype %d for %s!", filetype, qPrintable(pathname));
+            qCWarning(log, "Unsupported filetype %d at '%s'.", filetype, qPrintable(pathname));
             continue;
         }
 
         QScopedPointer<QFile> file(new QFile(filePath));
         if (!file->open(QIODevice::WriteOnly)) {
-            qWarning("Cannot open file for writing: %s", qPrintable(pathname));
+            qCWarning(log, "Cannot open file for writing at '%s'.", qPrintable(pathname));
             continue;
         }
 
@@ -105,9 +87,11 @@ void Extractor::extract(const QString &sourceFile, const QString &destination, c
                     break;
                 }
 
-                qWarning("Cannot read from archive: %s", archive_error_string(info.archiveHandle));
-                emit error(sourceFile,
-                           QString::fromLocal8Bit(archive_error_string(info.archiveHandle)));
+                qCWarning(log, "Cannot read from archive: %s.", archive_error_string(info.archiveHandle));
+                emit error(sourceFile, QString::fromLocal8Bit(archive_error_string(info.archiveHandle)));
+
+                archive_read_free(info.archiveHandle);
+
                 return;
             }
 

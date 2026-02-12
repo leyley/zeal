@@ -1,25 +1,6 @@
-/****************************************************************************
-**
-** Copyright (C) 2015-2016 Oleg Shparber
-** Copyright (C) 2013-2014 Jerzy Kozera
-** Contact: https://go.zealdocs.org/l/contact
-**
-** This file is part of Zeal.
-**
-** Zeal is free software: you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation, either version 3 of the License, or
-** (at your option) any later version.
-**
-** Zeal is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
-**
-** You should have received a copy of the GNU General Public License
-** along with Zeal. If not, see <https://www.gnu.org/licenses/>.
-**
-****************************************************************************/
+// Copyright (C) Oleg Shparber, et al. <https://zealdocs.org>
+// Copyright (C) 2013-2014 Jerzy Kozera
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "docset.h"
 
@@ -34,9 +15,10 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLoggingCategory>
 #include <QRegularExpression>
-#include <QVarLengthArray>
 #include <QVariant>
+#include <QVarLengthArray>
 
 #include <sqlite3.h>
 
@@ -44,6 +26,8 @@
 #include <utility>
 
 using namespace Zeal::Registry;
+
+static Q_LOGGING_CATEGORY(log, "zeal.registry.docset")
 
 namespace {
 constexpr char IndexNamePrefix[] = "__zi_name"; // zi - Zeal index
@@ -83,11 +67,12 @@ Docset::Docset(QString path)
             break;
     }
 
-    // TODO: Report errors here and below
-    if (!dir.cd(QStringLiteral("Contents")))
+    if (!dir.cd(QStringLiteral("Contents"))) {
+        qCWarning(log, "[%s] Cannot change directory into 'Contents' at '%s'.", qPrintable(m_name), qPrintable(m_path));
         return;
+    }
 
-    // TODO: 'info.plist' is invalid according to Apple, and must alsways be 'Info.plist'
+    // TODO: 'info.plist' is invalid according to Apple, and must always be 'Info.plist'
     // https://developer.apple.com/library/mac/documentation/MacOSX/Conceptual/BPRuntimeConfig
     // /Articles/ConfigFiles.html
     Util::Plist plist;
@@ -95,11 +80,15 @@ Docset::Docset(QString path)
         plist.read(dir.filePath(QStringLiteral("Info.plist")));
     else if (dir.exists(QStringLiteral("info.plist")))
         plist.read(dir.filePath(QStringLiteral("info.plist")));
-    else
+    else {
+        qCWarning(log, "Cannot find file 'Info.plist' or 'info.plist' for docset at '%s'.", qPrintable(m_path));
         return;
+    }
 
-    if (plist.hasError())
+    if (plist.hasError()) {
+        qCWarning(log, "Failed to parse 'Info.plist' for docset at '%s'.", qPrintable(m_path));
         return;
+    }
 
     if (m_name.isEmpty()) {
         // Fallback if meta.json is absent
@@ -123,13 +112,20 @@ Docset::Docset(QString path)
         m_name = m_name + QLatin1String("cheats");
     }
 
-    if (!dir.cd(QStringLiteral("Resources")) || !dir.exists(QStringLiteral("docSet.dsidx")))
+    if (!dir.cd(QStringLiteral("Resources"))) {
+        qCWarning(log, "[%s] Cannot change directory into 'Resources' at '%s'.", qPrintable(m_name), qPrintable(m_path));
         return;
+    }
+
+    if (!dir.exists(QStringLiteral("docSet.dsidx"))) {
+        qCWarning(log, "[%s] Cannot access 'docSet.dsidx' at '%s'.", qPrintable(m_name), qPrintable(m_path));
+        return;
+    }
 
     m_db = new Util::SQLiteDatabase(dir.filePath(QStringLiteral("docSet.dsidx")));
 
     if (!m_db->isOpen()) {
-        qWarning("SQL Error: %s", qPrintable(m_db->lastError()));
+        qCWarning(log, "[%s] Cannot open database: %s.", qPrintable(m_name), qPrintable(m_db->lastError()));
         return;
     }
 
@@ -146,6 +142,7 @@ Docset::Docset(QString path)
     }
 
     if (!dir.cd(QStringLiteral("Documents"))) {
+        qCWarning(log, "[%s] Cannot change directory into 'Documents' at '%s'.", qPrintable(m_name), qPrintable(m_path));
         m_type = Type::Invalid;
         return;
     }
@@ -168,7 +165,7 @@ Docset::Docset(QString path)
     }
 
     if (plist.contains(InfoPlist::IsJavaScriptEnabled)) {
-        m_javaScriptEnabled = plist[InfoPlist::IsJavaScriptEnabled].toBool();
+        m_isJavaScriptEnabled = plist[InfoPlist::IsJavaScriptEnabled].toBool();
     }
 
     m_keywords.removeDuplicates();
@@ -196,7 +193,7 @@ Docset::Docset(QString path)
 
     // Log if unable to determine the index page. Otherwise the path will be set in setBaseUrl().
     if (m_indexFilePath.isEmpty()) {
-        qWarning("Cannot determine index file for docset %s", qPrintable(m_name));
+        qCInfo(log, "[%s] Cannot determine index file.", qPrintable(m_name));
         m_indexFileUrl.setUrl(NotFoundPageUrl);
     } else {
         m_indexFileUrl = createPageUrl(m_indexFilePath);
@@ -235,7 +232,7 @@ QString Docset::version() const
     return m_version;
 }
 
-QString Docset::revision() const
+int Docset::revision() const
 {
     return m_revision;
 }
@@ -294,7 +291,7 @@ QList<SearchResult> Docset::search(const QString &query, const CancellationToken
 {
     QString sql;
     if (m_type == Docset::Type::Dash) {
-        if (m_fuzzySearchEnabled) {
+        if (m_isFuzzySearchEnabled) {
             sql = QStringLiteral("SELECT name, type, path, '', zealScore('%1', name) as score"
                                  "  FROM searchIndex"
                                  "  WHERE score > 0");
@@ -304,7 +301,7 @@ QList<SearchResult> Docset::search(const QString &query, const CancellationToken
                                  "  WHERE (name LIKE '%%1%' ESCAPE '\\')");
         }
     } else {
-        if (m_fuzzySearchEnabled) {
+        if (m_isFuzzySearchEnabled) {
             sql = QStringLiteral("SELECT name, type, path, fragment, zealScore('%1', name) as score"
                                  "  FROM searchIndex"
                                  "  WHERE score > 0");
@@ -401,7 +398,7 @@ void Docset::loadMetadata()
     m_name = jsonObject[QStringLiteral("name")].toString();
     m_title = jsonObject[QStringLiteral("title")].toString();
     m_version = jsonObject[QStringLiteral("version")].toString();
-    m_revision = jsonObject[QStringLiteral("revision")].toString();
+    m_revision = jsonObject[QStringLiteral("revision")].toString().toInt();
 
     if (jsonObject.contains(QStringLiteral("feed_url"))) {
         m_feedUrl = jsonObject[QStringLiteral("feed_url")].toString();
@@ -421,7 +418,7 @@ void Docset::loadMetadata()
         }
 
         if (extra.contains(QStringLiteral("isJavaScriptEnabled"))) {
-            m_javaScriptEnabled = extra[QStringLiteral("isJavaScriptEnabled")].toBool();
+            m_isJavaScriptEnabled = extra[QStringLiteral("isJavaScriptEnabled")].toBool();
         }
     }
 }
@@ -432,7 +429,8 @@ void Docset::countSymbols()
                                               "  FROM searchIndex"
                                               "  GROUP BY type");
     if (!m_db->prepare(sql)) {
-        qWarning("SQL Error: %s", qPrintable(m_db->lastError()));
+        qCWarning(log, "[%s] Cannot prepare statement to count symbols: %s.",
+                  qPrintable(m_name), qPrintable(m_db->lastError()));
         return;
     }
 
@@ -441,7 +439,7 @@ void Docset::countSymbols()
 
         // A workaround for https://github.com/zealdocs/zeal/issues/980.
         if (symbolTypeStr.isEmpty()) {
-            qWarning("Empty symbol type in the '%s' docset, skipping...", qPrintable(m_name));
+            qCDebug(log, "[%s] Found empty symbol type, skipping...", qPrintable(m_name));
             continue;
         }
 
@@ -458,7 +456,7 @@ void Docset::loadSymbols(const QString &symbolType) const
     // with it.first and it.second respectively pointing to the start and the end
     // of the range of nodes having symbolType as key. It effectively represents a
     // contiguous view over the nodes with a specified key.
-    for (auto it = qAsConst(m_symbolStrings).equal_range(symbolType); it.first != it.second; ++it.first) {
+    for (auto it = std::as_const(m_symbolStrings).equal_range(symbolType); it.first != it.second; ++it.first) {
         loadSymbols(symbolType, it.first.value());
     }
 }
@@ -479,7 +477,8 @@ void Docset::loadSymbols(const QString &symbolType, const QString &symbolString)
     }
 
     if (!m_db->prepare(sql.arg(symbolString))) {
-        qWarning("SQL Error: %s", qPrintable(m_db->lastError()));
+        qCWarning(log, "[%s] Cannot prepare statement to load symbols for type '%s': %s.",
+                  qPrintable(m_name), qPrintable(symbolString), qPrintable(m_db->lastError()));
         return;
     }
 
@@ -519,11 +518,11 @@ void Docset::createIndex()
     }
 
     // Drop old indexes
-    for (const QString &oldIndexName : qAsConst(oldIndexes)) {
+    for (const QString &oldIndexName : std::as_const(oldIndexes)) {
         m_db->execute(indexDropQuery.arg(oldIndexName));
     }
 
-    m_db->execute(indexCreateQuery.arg(IndexNamePrefix, IndexNameVersion, tableName, columnName));
+    m_db->execute(indexCreateQuery.arg(IndexNamePrefix).arg(IndexNameVersion).arg(tableName).arg(columnName));
 }
 
 void Docset::createView()
@@ -695,7 +694,7 @@ QString Docset::parseSymbolType(const QString &str)
         {QStringLiteral("_Struct"), QStringLiteral("Structure")},
         {QStringLiteral("_Structs"), QStringLiteral("Structure")},
         {QStringLiteral("struct"), QStringLiteral("Structure")},
-        {QStringLiteral("Сontrol Structure"), QStringLiteral("Structure")},
+        {QStringLiteral("Control Structure"), QStringLiteral("Structure")},
         {QStringLiteral("Data Structures"), QStringLiteral("Structure")},
         {QStringLiteral("Struct"), QStringLiteral("Structure")},
         // Type
@@ -730,17 +729,17 @@ void Docset::setBaseUrl(const QUrl &baseUrl)
 
 bool Docset::isFuzzySearchEnabled() const
 {
-    return m_fuzzySearchEnabled;
+    return m_isFuzzySearchEnabled;
 }
 
 void Docset::setFuzzySearchEnabled(bool enabled)
 {
-    m_fuzzySearchEnabled = enabled;
+    m_isFuzzySearchEnabled = enabled;
 }
 
 bool Docset::isJavaScriptEnabled() const
 {
-    return m_javaScriptEnabled;
+    return m_isJavaScriptEnabled;
 }
 
 /**

@@ -1,24 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2019 Oleg Shparber
-** Contact: https://go.zealdocs.org/l/contact
-**
-** This file is part of Zeal.
-**
-** Zeal is free software: you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation, either version 3 of the License, or
-** (at your option) any later version.
-**
-** Zeal is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
-**
-** You should have received a copy of the GNU General Public License
-** along with Zeal. If not, see <https://www.gnu.org/licenses/>.
-**
-****************************************************************************/
+// Copyright (C) Oleg Shparber, et al. <https://zealdocs.org>
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "proxyview.h"
 
@@ -26,12 +7,15 @@
 
 #include <ui/widgets/layouthelper.h>
 
+#include <QLoggingCategory>
 #include <QVBoxLayout>
 
 #include <utility>
 
 using namespace Zeal;
 using namespace Zeal::Sidebar;
+
+static Q_LOGGING_CATEGORY(log, "zeal.sidebar.proxyview")
 
 ProxyView::ProxyView(ViewProvider *provider, QString id, QWidget *parent)
     : View(parent)
@@ -43,7 +27,7 @@ ProxyView::ProxyView(ViewProvider *provider, QString id, QWidget *parent)
     connect(m_viewProvider, &ViewProvider::viewChanged, this, [this]() {
         auto view = m_viewProvider->view(m_viewId);
         if (view == nullptr) {
-            qWarning("ViewProvider returned invalid view!");
+            qCWarning(log, "ViewProvider returned invalid view for id '%s'.", qPrintable(m_viewId));
             return;
         }
 
@@ -66,10 +50,12 @@ void ProxyView::clearCurrentView()
 {
     // Unparent the view, because we don't own it.
     QLayout *l = layout();
-    if (l->isEmpty())
+    if (l->isEmpty() || m_view == nullptr) {
         return;
+    }
 
     m_view->hide();
     l->removeWidget(m_view);
     m_view->setParent(nullptr);
+    m_view = nullptr;
 }

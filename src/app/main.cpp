@@ -1,25 +1,6 @@
-/****************************************************************************
-**
-** Copyright (C) 2015-2016 Oleg Shparber
-** Copyright (C) 2013-2014 Jerzy Kozera
-** Contact: https://go.zealdocs.org/l/contact
-**
-** This file is part of Zeal.
-**
-** Zeal is free software: you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation, either version 3 of the License, or
-** (at your option) any later version.
-**
-** Zeal is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
-**
-** You should have received a copy of the GNU General Public License
-** along with Zeal. If not, see <https://www.gnu.org/licenses/>.
-**
-****************************************************************************/
+// Copyright (C) Oleg Shparber, et al. <https://zealdocs.org>
+// Copyright (C) 2013-2014 Jerzy Kozera
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <core/application.h>
 #include <core/applicationsingleton.h>
@@ -36,10 +17,12 @@
 #include <QTimer>
 #include <QUrlQuery>
 
-#ifdef Q_OS_WIN32
+#ifdef Q_OS_WINDOWS
 #include <QSettings>
 
 #include <Windows.h>
+
+#include <utility> // for std::ignore
 #endif
 
 #include <cstdlib>
@@ -48,23 +31,31 @@ using namespace Zeal;
 
 struct CommandLineParameters
 {
-    bool force;
+    bool forceMinimized;
     bool preventActivation;
-    Registry::SearchQuery query;
-#ifdef Q_OS_WIN32
+
+#ifdef Q_OS_WINDOWS
+    bool attachConsole;
     bool registerProtocolHandlers;
     bool unregisterProtocolHandlers;
 #endif
+
+    Registry::SearchQuery query;
 };
 
 QString stripParameterUrl(const QString &url, const QString &scheme)
 {
-    QStringRef ref = url.midRef(scheme.length() + 1);
-    if (ref.startsWith(QLatin1String("//")))
-        ref = ref.mid(2);
-    if (ref.endsWith(QLatin1Char('/')))
-        ref = ref.left(ref.length() - 1);
-    return ref.toString();
+    QString str = url.mid(scheme.length() + 1);
+
+    if (str.startsWith(QLatin1String("//"))) {
+        str = str.mid(2);
+    }
+
+    if (str.endsWith(QLatin1Char('/'))) {
+        str = str.left(str.length() - 1);
+    }
+
+    return str;
 }
 
 CommandLineParameters parseCommandLine(const QStringList &arguments)
@@ -74,23 +65,27 @@ CommandLineParameters parseCommandLine(const QStringList &arguments)
     parser.addHelpOption();
     parser.addVersionOption();
 
-    parser.addOption({{QStringLiteral("f"), QStringLiteral("force")},
-                      QObject::tr("Force the application run.")});
+    parser.addOptions({
+        {QStringLiteral("minimized"), QObject::tr("Start minimized regardless of settings.")}
+    });
 
-#ifdef Q_OS_WIN32
-    parser.addOption(QCommandLineOption({QStringLiteral("register")},
-                                        QObject::tr("Register protocol handlers")));
-    parser.addOption(QCommandLineOption({QStringLiteral("unregister")},
-                                        QObject::tr("Unregister protocol handlers")));
+#ifdef Q_OS_WINDOWS
+    parser.addOptions({
+        {QStringLiteral("attach-console"), QObject::tr("Attach console for logging.")},
+        {QStringLiteral("register"), QObject::tr("Register protocol handlers.")},
+        {QStringLiteral("unregister"), QObject::tr("Unregister protocol handlers.")}
+    });
 #endif
+
     parser.addPositionalArgument(QStringLiteral("url"), QObject::tr("dash[-plugin]:// URL"));
     parser.process(arguments);
 
     CommandLineParameters clParams;
-    clParams.force = parser.isSet(QStringLiteral("force"));
+    clParams.forceMinimized = parser.isSet(QStringLiteral("minimized"));
     clParams.preventActivation = false;
 
-#ifdef Q_OS_WIN32
+#ifdef Q_OS_WINDOWS
+    clParams.attachConsole = parser.isSet(QStringLiteral("attach-console"));
     clParams.registerProtocolHandlers = parser.isSet(QStringLiteral("register"));
     clParams.unregisterProtocolHandlers = parser.isSet(QStringLiteral("unregister"));
 
@@ -125,7 +120,7 @@ CommandLineParameters parseCommandLine(const QStringList &arguments)
     return clParams;
 }
 
-#ifdef Q_OS_WIN32
+#ifdef Q_OS_WINDOWS
 void registerProtocolHandler(const QString &scheme, const QString &description)
 {
     const QString appPath = QDir::toNativeSeparators(QCoreApplication::applicationFilePath());
@@ -179,32 +174,54 @@ int main(int argc, char *argv[])
     QCoreApplication::setOrganizationDomain(QStringLiteral("zealdocs.org"));
     QCoreApplication::setOrganizationName(QStringLiteral("Zeal"));
 
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
     QCoreApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
+#endif
+
+// Use Fusion style on Windows 10 & 11. This enables proper dark mode support.
+// See https://www.qt.io/blog/dark-mode-on-windows-11-with-qt-6.5.
+// TODO: Make style configurable, detect -style argument.
+#if defined(Q_OS_WINDOWS) && (QT_VERSION >= QT_VERSION_CHECK(6, 5, 0))
+    const auto osName = QSysInfo::prettyProductName();
+    if (osName.startsWith("Windows 10") || osName.startsWith("Windows 11")) {
+        QApplication::setStyle("fusion");
+    }
+#endif
 
     QScopedPointer<QApplication> qapp(new QApplication(argc, argv));
 
     const CommandLineParameters clParams = parseCommandLine(qapp->arguments());
 
-#ifdef Q_OS_WIN32
+#ifdef Q_OS_WINDOWS
     const static QHash<QString, QString> protocols = {
-        {QStringLiteral("dash"), QStringLiteral("Dash Protocol")},
-        {QStringLiteral("dash-plugin"), QStringLiteral("Dash Plugin Protocol")}
+        {QStringLiteral("dash"), QStringLiteral("URL:Dash Protocol (Zeal)")},
+        {QStringLiteral("dash-plugin"), QStringLiteral("URL:Dash Plugin Protocol (Zeal)")}
     };
+
+    if (clParams.registerProtocolHandlers) {
+        registerProtocolHandlers(protocols, clParams.registerProtocolHandlers);
+        return EXIT_SUCCESS;
+    }
 
     if (clParams.unregisterProtocolHandlers) {
         unregisterProtocolHandlers(protocols);
         return EXIT_SUCCESS;
-    } else {
-        registerProtocolHandlers(protocols, clParams.registerProtocolHandlers);
-        if (clParams.registerProtocolHandlers)
-            return EXIT_SUCCESS;
     }
 #endif
 
+#ifdef Q_OS_WINDOWS
+    if (clParams.attachConsole && AttachConsole(ATTACH_PARENT_PROCESS)) {
+        FILE *fp = nullptr;
+        std::ignore = freopen_s(&fp, "CONOUT$", "w", stdout);
+        std::ignore = freopen_s(&fp, "CONOUT$", "w", stderr);
+        std::ignore = freopen_s(&fp, "CONIN$", "r", stdin);
+    }
+#endif // Q_OS_WINDOWS
+
     QScopedPointer<Core::ApplicationSingleton> appSingleton(new Core::ApplicationSingleton());
     if (appSingleton->isSecondary()) {
-#ifdef Q_OS_WIN32
+#ifdef Q_OS_WINDOWS
         ::AllowSetForegroundWindow(appSingleton->primaryPid());
 #endif
         QByteArray ba;
@@ -216,7 +233,7 @@ int main(int argc, char *argv[])
     }
 
     // Set application-wide window icon. All message boxes and other windows will use it by default.
-    qapp->setDesktopFileName(QStringLiteral("org.zealdocs.zeal.desktop"));
+    qapp->setDesktopFileName(QStringLiteral("org.zealdocs.zeal"));
     qapp->setWindowIcon(QIcon::fromTheme(QStringLiteral("zeal"),
                                          QIcon(QStringLiteral(":/zeal.ico"))));
 
@@ -234,6 +251,8 @@ int main(int argc, char *argv[])
 
         app->executeQuery(query, preventActivation);
     });
+
+    app->showMainWindow(clParams.forceMinimized);
 
     if (!clParams.query.isEmpty()) {
         QTimer::singleShot(0, app.data(), [&app, clParams] {

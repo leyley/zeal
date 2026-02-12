@@ -1,40 +1,29 @@
-/****************************************************************************
-**
-** Copyright (C) 2015-2016 Oleg Shparber
-** Contact: https://go.zealdocs.org/l/contact
-**
-** This file is part of Zeal.
-**
-** Zeal is free software: you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation, either version 3 of the License, or
-** (at your option) any later version.
-**
-** Zeal is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
-**
-** You should have received a copy of the GNU General Public License
-** along with Zeal. If not, see <https://www.gnu.org/licenses/>.
-**
-****************************************************************************/
+// Copyright (C) Oleg Shparber, et al. <https://zealdocs.org>
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "settings.h"
 
 #include "application.h"
 
-#include <QCoreApplication>
+#include <QApplication>
 #include <QDir>
 #include <QFileInfo>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QUrl>
 #include <QUuid>
+#include <QWebEngineProfile>
 #include <QWebEngineSettings>
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+#include <QStyleHints>
+#else
+#include <QPalette>
+#endif
 
 namespace {
 // Configuration file groups
+constexpr char GroupUI[] = "ui";
 constexpr char GroupContent[] = "content";
 constexpr char GroupDocsets[] = "docsets";
 constexpr char GroupGlobalShortcuts[] = "global_shortcuts";
@@ -50,7 +39,13 @@ using namespace Zeal::Core;
 Settings::Settings(QObject *parent)
     : QObject(parent)
 {
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+    qRegisterMetaTypeStreamOperators<ContentAppearance>("ContentAppearance");
     qRegisterMetaTypeStreamOperators<ExternalLinkPolicy>("ExternalLinkPolicy");
+#else
+    qRegisterMetaType<ContentAppearance>("ContentAppearance");
+    qRegisterMetaType<ExternalLinkPolicy>("ExternalLinkPolicy");
+#endif
 
     load();
 }
@@ -58,6 +53,34 @@ Settings::Settings(QObject *parent)
 Settings::~Settings()
 {
     save();
+}
+
+bool Settings::isDarkModeEnabled() const
+{
+    if (contentAppearance == ContentAppearance::Dark) {
+        return true;
+    }
+
+    if (contentAppearance == ContentAppearance::Automatic && colorScheme() == ColorScheme::Dark) {
+        return true;
+    }
+
+    return false;
+}
+
+Zeal::Core::Settings::ColorScheme Settings::colorScheme()
+{
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+    return QApplication::styleHints()->colorScheme();
+#else
+    // Pre Qt 6.5 detection from https://www.qt.io/blog/dark-mode-on-windows-11-with-qt-6.5.
+    const QPalette p;
+    if (p.color(QPalette::WindowText).lightness() > p.color(QPalette::Window).lightness()) {
+        return ColorScheme::Dark;
+    }
+
+    return ColorScheme::Light;
+#endif
 }
 
 void Settings::load()
@@ -73,6 +96,10 @@ void Settings::load()
     minimizeToSystray = settings->value(QStringLiteral("minimize_to_systray"), false).toBool();
     hideOnClose = settings->value(QStringLiteral("hide_on_close"), false).toBool();
 
+    settings->beginGroup(GroupUI);
+    hideMenuBar = settings->value(QStringLiteral("hide_menu_bar"), false).toBool();
+    settings->endGroup();
+
     settings->beginGroup(GroupGlobalShortcuts);
     showShortcut = settings->value(QStringLiteral("show")).value<QKeySequence>();
     settings->endGroup();
@@ -82,12 +109,23 @@ void Settings::load()
     settings->endGroup();
 
     settings->beginGroup(GroupSearch);
-    fuzzySearchEnabled = settings->value(QStringLiteral("fuzzy_search_enabled"), false).toBool();
+    isFuzzySearchEnabled = settings->value(QStringLiteral("fuzzy_search_enabled"), false).toBool();
     settings->endGroup();
 
     settings->beginGroup(GroupContent);
+
+    contentAppearance = settings->value(QStringLiteral("appearance"),
+                                        QVariant::fromValue(ContentAppearance::Automatic)).value<ContentAppearance>();
+
+#if QT_VERSION < QT_VERSION_CHECK(6, 7, 0)
+    // Dark mode needs to be applied before Qt WebEngine is initialized.
+    if (isDarkModeEnabled()) {
+        qputenv("QTWEBENGINE_CHROMIUM_FLAGS", "--blink-settings=forceDarkModeEnabled=true,darkModeInversionAlgorithm=4");
+    }
+#endif
+
     // Fonts
-    QWebEngineSettings *webSettings = QWebEngineSettings::defaultSettings();
+    QWebEngineSettings *webSettings = QWebEngineProfile::defaultProfile()->settings();
     serifFontFamily = settings->value(QStringLiteral("serif_font_family"),
                                       webSettings->fontFamily(QWebEngineSettings::SerifFont)).toString();
     sansSerifFontFamily = settings->value(QStringLiteral("sans_serif_font_family"),
@@ -127,12 +165,11 @@ void Settings::load()
     webSettings->setFontSize(QWebEngineSettings::DefaultFixedFontSize, defaultFixedFontSize);
     webSettings->setFontSize(QWebEngineSettings::MinimumFontSize, minimumFontSize);
 
-    darkModeEnabled = settings->value(QStringLiteral("dark_mode"), false).toBool();
-    highlightOnNavigateEnabled = settings->value(QStringLiteral("highlight_on_navigate"), true).toBool();
+    isHighlightOnNavigateEnabled = settings->value(QStringLiteral("highlight_on_navigate"), true).toBool();
     customCssFile = settings->value(QStringLiteral("custom_css_file")).toString();
     externalLinkPolicy = settings->value(QStringLiteral("external_link_policy"),
                                          QVariant::fromValue(ExternalLinkPolicy::Ask)).value<ExternalLinkPolicy>();
-    isSmoothScrollingEnabled = settings->value(QStringLiteral("smooth_scrolling"), false).toBool();
+    isSmoothScrollingEnabled = settings->value(QStringLiteral("smooth_scrolling"), true).toBool();
     settings->endGroup();
 
     settings->beginGroup(GroupProxy);
@@ -143,6 +180,7 @@ void Settings::load()
     proxyAuthenticate = settings->value(QStringLiteral("authenticate"), false).toBool();
     proxyUserName = settings->value(QStringLiteral("username")).toString();
     proxyPassword = settings->value(QStringLiteral("password")).toString();
+    isIgnoreSslErrorsEnabled = settings->value(QStringLiteral("ignore_ssl_errors"), false).toBool();
     settings->endGroup();
 
     settings->beginGroup(GroupDocsets);
@@ -150,7 +188,7 @@ void Settings::load()
         docsetPath = settings->value(QStringLiteral("path")).toString();
     } else {
 #ifndef PORTABLE_BUILD
-        docsetPath = QStandardPaths::writableLocation(QStandardPaths::DataLocation)
+        docsetPath = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)
                 + QLatin1String("/docsets");
 #else
         docsetPath = QStringLiteral("docsets");
@@ -194,6 +232,10 @@ void Settings::save()
     settings->setValue(QStringLiteral("minimize_to_systray"), minimizeToSystray);
     settings->setValue(QStringLiteral("hide_on_close"), hideOnClose);
 
+    settings->beginGroup(GroupUI);
+    settings->setValue(QStringLiteral("hide_menu_bar"), hideMenuBar);
+    settings->endGroup();
+
     settings->beginGroup(GroupGlobalShortcuts);
     settings->setValue(QStringLiteral("show"), showShortcut);
     settings->endGroup();
@@ -203,7 +245,7 @@ void Settings::save()
     settings->endGroup();
 
     settings->beginGroup(GroupSearch);
-    settings->setValue(QStringLiteral("fuzzy_search_enabled"), fuzzySearchEnabled);
+    settings->setValue(QStringLiteral("fuzzy_search_enabled"), isFuzzySearchEnabled);
     settings->endGroup();
 
     settings->beginGroup(GroupContent);
@@ -216,8 +258,8 @@ void Settings::save()
     settings->setValue(QStringLiteral("default_fixed_font_size"), defaultFixedFontSize);
     settings->setValue(QStringLiteral("minimum_font_size"), minimumFontSize);
 
-    settings->setValue(QStringLiteral("dark_mode"), darkModeEnabled);
-    settings->setValue(QStringLiteral("highlight_on_navigate"), highlightOnNavigateEnabled);
+    settings->setValue(QStringLiteral("appearance"), QVariant::fromValue(contentAppearance));
+    settings->setValue(QStringLiteral("highlight_on_navigate"), isHighlightOnNavigateEnabled);
     settings->setValue(QStringLiteral("custom_css_file"), customCssFile);
     settings->setValue(QStringLiteral("external_link_policy"), QVariant::fromValue(externalLinkPolicy));
     settings->setValue(QStringLiteral("smooth_scrolling"), isSmoothScrollingEnabled);
@@ -230,6 +272,7 @@ void Settings::save()
     settings->setValue(QStringLiteral("authenticate"), proxyAuthenticate);
     settings->setValue(QStringLiteral("username"), proxyUserName);
     settings->setValue(QStringLiteral("password"), proxyPassword);
+    settings->setValue(QStringLiteral("ignore_ssl_errors"), isIgnoreSslErrorsEnabled);
     settings->endGroup();
 
     settings->beginGroup(GroupDocsets);
@@ -326,6 +369,20 @@ QSettings *Settings::qsettings(QObject *parent)
     return new QSettings(QCoreApplication::applicationDirPath() + QLatin1String("/zeal.ini"),
                          QSettings::IniFormat, parent);
 #endif
+}
+
+QDataStream &operator<<(QDataStream &out, Settings::ContentAppearance policy)
+{
+    out << static_cast<std::underlying_type<Settings::ContentAppearance>::type>(policy);
+    return out;
+}
+
+QDataStream &operator>>(QDataStream &in, Settings::ContentAppearance &policy)
+{
+    std::underlying_type<Settings::ContentAppearance>::type value;
+    in >> value;
+    policy = static_cast<Settings::ContentAppearance>(value);
+    return in;
 }
 
 QDataStream &operator<<(QDataStream &out, Settings::ExternalLinkPolicy policy)

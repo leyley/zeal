@@ -1,27 +1,7 @@
+// Copyright (C) Oleg Shparber, et al. <https://zealdocs.org>
+// SPDX-License-Identifier: GPL-3.0-or-later
 /****************************************************************************
-**
-** Copyright (C) 2015-2016 Oleg Shparber
-** Copyright (C) 2013-2014 Jerzy Kozera
-** Contact: https://go.zealdocs.org/l/contact
-**
-** This file is part of Zeal.
-**
-** Zeal is free software: you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation, either version 3 of the License, or
-** (at your option) any later version.
-**
-** Zeal is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
-**
-** You should have received a copy of the GNU General Public License
-** along with Zeal. If not, see <https://www.gnu.org/licenses/>.
-**
-****************************************************************************/
-/****************************************************************************
-** Copyright (c) 2006 - 2011, the LibQxt project.
+// Copyright (C) 2006 - 2011, the LibQxt project.
 ** See the Qxt AUTHORS file for a list of authors and copyright holders.
 ** All rights reserved.
 **
@@ -52,10 +32,16 @@
 
 #include "qxtglobalshortcut_p.h"
 
+#include <QGuiApplication>
 #include <QKeySequence>
 #include <QScopedPointer>
 #include <QVector>
+
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
 #include <QX11Info>
+#else
+#include <QtGui/private/qtx11extras_p.h>
+#endif
 
 #include <X11/Xlib.h>
 #include <xcb/xcb.h>
@@ -67,8 +53,13 @@ constexpr quint32 maskModifiers[] = {
 };
 } // namespace
 
+bool QxtGlobalShortcutPrivate::isSupported()
+{
+    return QGuiApplication::platformName() == QLatin1String("xcb");
+}
+
 bool QxtGlobalShortcutPrivate::nativeEventFilter(const QByteArray &eventType,
-                                                 void *message, long *result)
+                                                 void *message, NativeEventFilterResult *result)
 {
     Q_UNUSED(result)
     if (eventType != "xcb_generic_event_t")
@@ -147,7 +138,7 @@ bool QxtGlobalShortcutPrivate::registerShortcut(quint32 nativeKey, quint32 nativ
     }
 
     bool failed = false;
-    for (xcb_void_cookie_t cookie : qAsConst(xcbCookies)) {
+    for (xcb_void_cookie_t cookie : std::as_const(xcbCookies)) {
         QScopedPointer<xcb_generic_error_t, QScopedPointerPodDeleter> error(xcb_request_check(xcbConnection, cookie));
         failed = !error.isNull();
     }

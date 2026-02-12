@@ -28,7 +28,7 @@
       </attribute>
       <layout class="QVBoxLayout" name="verticalLayout_5">
        <item>
-        <widget class="QListView" name="installedDocsetList">
+        <widget class="QTreeView" name="installedDocsetList">
          <property name="selectionMode">
           <enum>QAbstractItemView::ExtendedSelection</enum>
          </property>
@@ -132,13 +132,6 @@
        </item>
        <item>
         <layout class="QHBoxLayout" name="horizontalLayout">
-         <item>
-          <widget class="QLabel" name="label">
-           <property name="text">
-            <string>Last updated:</string>
-           </property>
-          </widget>
-         </item>
          <item>
           <widget class="QLabel" name="lastUpdatedLabel">
            <property name="text">

@@ -1,25 +1,6 @@
-/****************************************************************************
-**
-** Copyright (C) 2015-2016 Oleg Shparber
-** Copyright (C) 2013-2014 Jerzy Kozera
-** Contact: https://go.zealdocs.org/l/contact
-**
-** This file is part of Zeal.
-**
-** Zeal is free software: you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation, either version 3 of the License, or
-** (at your option) any later version.
-**
-** Zeal is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
-**
-** You should have received a copy of the GNU General Public License
-** along with Zeal. If not, see <https://www.gnu.org/licenses/>.
-**
-****************************************************************************/
+// Copyright (C) Oleg Shparber, et al. <https://zealdocs.org>
+// Copyright (C) 2013-2014 Jerzy Kozera
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "docsetsdialog.h"
 #include "ui_docsetsdialog.h"
@@ -32,6 +13,7 @@
 #include <registry/docset.h>
 #include <registry/docsetregistry.h>
 #include <registry/itemdatarole.h>
+#include <util/humanizer.h>
 
 #include <QClipboard>
 #include <QDateTime>
@@ -51,7 +33,7 @@
 using namespace Zeal;
 using namespace Zeal::WidgetUi;
 
-#ifdef Q_OS_WIN32
+#ifdef Q_OS_WINDOWS
 extern Q_CORE_EXPORT int qt_ntfs_permission_lookup;
 #endif
 
@@ -62,7 +44,7 @@ constexpr char RedirectServerUrl[] = "https://go.zealdocs.org/d/%1/%2/latest";
 constexpr char DocsetListCacheFileName[] = "com.kapeli.json";
 
 // TODO: Make the timeout period configurable
-constexpr int CacheTimeout = 24 * 60 * 60 * 1000; // 24 hours in microseconds
+constexpr int CacheTimeout = 24 * 60 * 60; // 24 hours in seconds
 
 // QNetworkReply properties
 constexpr char DocsetNameProperty[] = "docsetName";
@@ -174,13 +156,13 @@ void DocsetsDialog::updateAllDocsets()
 
 void DocsetsDialog::removeSelectedDocsets()
 {
-    QItemSelectionModel *selectonModel = ui->installedDocsetList->selectionModel();
-    if (!selectonModel->hasSelection())
+    QItemSelectionModel *selectionModel = ui->installedDocsetList->selectionModel();
+    if (!selectionModel->hasSelection())
         return;
 
     int ret;
 
-    const QModelIndexList selectedIndexes = selectonModel->selectedRows();
+    const QModelIndexList selectedIndexes = selectionModel->selectedRows();
     if (selectedIndexes.size() == 1) {
         const QString docsetTitle = selectedIndexes.first().data().toString();
         ret = QMessageBox::question(this, QStringLiteral("Zeal"),
@@ -258,9 +240,7 @@ void DocsetsDialog::downloadCompleted()
             const QString msg = tr("Download failed!<br><br><b>Error:</b> %1<br><b>URL:</b> %2")
                     .arg(reply->errorString(), reply->request().url().toString());
             const int ret = QMessageBox::warning(this, QStringLiteral("Zeal"), msg,
-                                                 QMessageBox::Retry | QMessageBox::Default,
-                                                 QMessageBox::Cancel | QMessageBox::Escape,
-                                                 QMessageBox::NoButton);
+                                                 QMessageBox::Retry | QMessageBox::Cancel);
 
             if (ret == QMessageBox::Retry) {
                 QNetworkReply *newReply = download(reply->request().url());
@@ -286,18 +266,18 @@ void DocsetsDialog::downloadCompleted()
 
     switch (reply->property(DownloadTypeProperty).toUInt()) {
     case DownloadDocsetList: {
-        const QByteArray data = reply->readAll();
+        const QByteArray replyData = reply->readAll();
 
         QScopedPointer<QFile> file(new QFile(cacheLocation(DocsetListCacheFileName)));
-        if (file->open(QIODevice::WriteOnly))
-            file->write(data);
+        if (file->open(QIODevice::WriteOnly)) {
+            file->write(replyData);
+            file->close(); // Flush to ensure timestamp update on all systems.
+        }
 
-        const QString updateTime = QFileInfo(file->fileName())
-                .lastModified().toString(QLocale::system().dateTimeFormat(QLocale::ShortFormat));
-        ui->lastUpdatedLabel->setText(updateTime);
+        updateDocsetListDownloadTimeLabel(QFileInfo(file->fileName()).lastModified());
 
         QJsonParseError jsonError;
-        const QJsonDocument jsonDoc = QJsonDocument::fromJson(data, &jsonError);
+        const QJsonDocument jsonDoc = QJsonDocument::fromJson(replyData, &jsonError);
 
         if (jsonError.error != QJsonParseError::NoError) {
             // TODO: Log QJsonParseError.
@@ -331,9 +311,9 @@ void DocsetsDialog::downloadCompleted()
         if (docset == nullptr) {
             // Fetch docset only on first feed download,
             // since further downloads are only update checks
-            QNetworkReply *reply = download(metadata.url());
-            reply->setProperty(DocsetNameProperty, metadata.name());
-            reply->setProperty(DownloadTypeProperty, DownloadDocset);
+            QNetworkReply *mdReply = download(metadata.url());
+            mdReply->setProperty(DocsetNameProperty, metadata.name());
+            mdReply->setProperty(DownloadTypeProperty, DownloadDocset);
         } else {
             // Check for feed update
             if (metadata.latestVersion() != docset->version()
@@ -361,8 +341,9 @@ void DocsetsDialog::downloadCompleted()
 
         QTemporaryFile *tmpFile = m_tmpFiles[docsetName];
         if (!tmpFile) {
-            tmpFile = new QTemporaryFile(this);
-            tmpFile->open();
+            tmpFile = new QTemporaryFile(QStringLiteral("%1/%2.XXXXXX.tmp").arg(Core::Application::cacheLocation(), docsetName), this);
+            if (!tmpFile->open())
+                return;
             m_tmpFiles.insert(docsetName, tmpFile);
         }
 
@@ -404,8 +385,9 @@ void DocsetsDialog::downloadProgress(qint64 received, qint64 total)
 
         QTemporaryFile *tmpFile = m_tmpFiles[docsetName];
         if (!tmpFile) {
-            tmpFile = new QTemporaryFile(this);
-            tmpFile->open();
+            tmpFile = new QTemporaryFile(QStringLiteral("%1/%2.XXXXXX.tmp").arg(Core::Application::cacheLocation(), docsetName), this);
+            if (!tmpFile->open())
+                return;
             m_tmpFiles.insert(docsetName, tmpFile);
         }
 
@@ -472,7 +454,13 @@ void DocsetsDialog::loadDocsetList()
     loadUserFeedList();
 
     const QFileInfo fi(cacheLocation(DocsetListCacheFileName));
-    if (!fi.exists() || fi.lastModified().msecsTo(QDateTime::currentDateTime()) > CacheTimeout) {
+    if (!fi.exists()) {
+        downloadDocsetList();
+        return;
+    }
+
+    const auto age = fi.lastModified().secsTo(QDateTime::currentDateTime());
+    if (age < 0 || age >= CacheTimeout) {
         downloadDocsetList();
         return;
     }
@@ -491,10 +479,7 @@ void DocsetsDialog::loadDocsetList()
         return;
     }
 
-    // TODO: Show more user friendly labels, like "5 hours ago"
-    const QString updateTime
-            = fi.lastModified().toString(QLocale::system().dateTimeFormat(QLocale::ShortFormat));
-    ui->lastUpdatedLabel->setText(updateTime);
+    updateDocsetListDownloadTimeLabel(fi.lastModified());
     processDocsetList(jsonDoc.array());
 }
 
@@ -503,11 +488,19 @@ void DocsetsDialog::setupInstalledDocsetsTab()
     ui->installedDocsetList->setItemDelegate(new DocsetListItemDelegate(this));
     ui->installedDocsetList->setModel(m_docsetRegistry->model());
 
+    ui->installedDocsetList->setItemsExpandable(false);
+    ui->installedDocsetList->setRootIsDecorated(false);
+
+    ui->installedDocsetList->header()->setStretchLastSection(true);
+    ui->installedDocsetList->header()->setSectionsMovable(false);
+    ui->installedDocsetList->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    ui->installedDocsetList->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+
     if (m_isStorageReadOnly) {
         return;
     }
 
-    connect(ui->installedDocsetList, &QListView::activated, this, [this](const QModelIndex &index) {
+    connect(ui->installedDocsetList, &QTreeView::activated, this, [this](const QModelIndex &index) {
         if (!index.data(Registry::ItemDataRole::UpdateAvailableRole).toBool()) {
             return;
         }
@@ -689,7 +682,7 @@ QNetworkReply *DocsetsDialog::download(const QUrl &url)
 
 void DocsetsDialog::cancelDownloads()
 {
-    for (QNetworkReply *reply : qAsConst(m_replies)) {
+    for (QNetworkReply *reply : std::as_const(m_replies)) {
         // Hide progress bar
         QListWidgetItem *listItem
                 = ui->availableDocsetList->item(reply->property(ListItemIndexProperty).toInt());
@@ -762,6 +755,20 @@ void DocsetsDialog::processDocsetList(const QJsonArray &list)
     ui->installedDocsetList->reset();
 }
 
+void DocsetsDialog::updateDocsetListDownloadTimeLabel(const QDateTime &modifiedTime)
+{
+    if (!modifiedTime.isValid()) {
+        ui->lastUpdatedLabel->clear();
+        ui->lastUpdatedLabel->setToolTip(QString());
+        return;
+    }
+
+    ui->lastUpdatedLabel->setText(tr("Last updated %1.").arg(Util::Humanizer::fromNow(modifiedTime)));
+
+    const QString updateTime = modifiedTime.toString(QLocale::system().dateTimeFormat(QLocale::ShortFormat));
+    ui->lastUpdatedLabel->setToolTip(updateTime);
+}
+
 void DocsetsDialog::downloadDashDocset(const QModelIndex &index)
 {
     const QString name = index.data(Registry::ItemDataRole::DocsetNameRole).toString();
@@ -772,7 +779,7 @@ void DocsetsDialog::downloadDashDocset(const QModelIndex &index)
     QUrl url;
     if (!m_userFeeds.contains(name)) {
         // No feed present means that this is a Kapeli docset
-        QString urlString = QString(RedirectServerUrl).arg("com.kapeli", name);
+        QString urlString = QString(RedirectServerUrl).arg("com.kapeli").arg(name);
         url = QUrl(urlString);
     } else {
         url = m_userFeeds[name].url();
@@ -815,7 +822,7 @@ void DocsetsDialog::updateStatus()
     }
 
     if (!m_tmpFiles.isEmpty()) {
-        text += QLatin1String(" ") + tr("Installing: %n.", nullptr, m_replies.size());
+        text += QLatin1String(" ") + tr("Installing: %n.", nullptr, m_tmpFiles.size());
     }
 
     ui->statusLabel->setText(text);

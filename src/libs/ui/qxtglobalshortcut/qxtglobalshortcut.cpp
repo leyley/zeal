@@ -1,27 +1,7 @@
+// Copyright (C) Oleg Shparber, et al. <https://zealdocs.org>
+// SPDX-License-Identifier: GPL-3.0-or-later
 /****************************************************************************
-**
-** Copyright (C) 2015-2016 Oleg Shparber
-** Copyright (C) 2013-2014 Jerzy Kozera
-** Contact: https://go.zealdocs.org/l/contact
-**
-** This file is part of Zeal.
-**
-** Zeal is free software: you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation, either version 3 of the License, or
-** (at your option) any later version.
-**
-** Zeal is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
-**
-** You should have received a copy of the GNU General Public License
-** along with Zeal. If not, see <https://www.gnu.org/licenses/>.
-**
-****************************************************************************/
-/****************************************************************************
-** Copyright (c) 2006 - 2011, the LibQxt project.
+// Copyright (C) 2006 - 2011, the LibQxt project.
 ** See the Qxt AUTHORS file for a list of authors and copyright holders.
 ** All rights reserved.
 **
@@ -54,7 +34,9 @@
 #include "qxtglobalshortcut_p.h"
 
 #include <QAbstractEventDispatcher>
-#include <QGuiApplication>
+#include <QLoggingCategory>
+
+static Q_LOGGING_CATEGORY(log, "zeal.ui.qxtglobalshortcut")
 
 #ifndef Q_OS_MACOS
 int QxtGlobalShortcutPrivate::ref = 0;
@@ -88,38 +70,52 @@ QxtGlobalShortcutPrivate::~QxtGlobalShortcutPrivate()
 bool QxtGlobalShortcutPrivate::setShortcut(const QKeySequence &shortcut)
 {
     Q_Q(QxtGlobalShortcut);
-    Qt::KeyboardModifiers allMods = Qt::ShiftModifier | Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier;
-    key = shortcut.isEmpty() ? Qt::Key(0) : Qt::Key((shortcut[0] ^ allMods) & shortcut[0]);
-    mods = shortcut.isEmpty() ? Qt::KeyboardModifiers(Qt::NoModifier) : Qt::KeyboardModifiers(shortcut[0] & allMods);
+
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+    const int combination = shortcut[0];
+#else
+    const int combination = shortcut[0].toCombined();
+#endif
+
+    key = shortcut.isEmpty() ? Qt::Key(0) : Qt::Key(combination & ~Qt::KeyboardModifierMask);
+    mods = shortcut.isEmpty() ? Qt::NoModifier : Qt::KeyboardModifiers(combination & Qt::KeyboardModifierMask);
     const quint32 nativeKey = nativeKeycode(key);
     const quint32 nativeMods = nativeModifiers(mods);
     const bool res = registerShortcut(nativeKey, nativeMods);
-    if (res)
-        shortcuts.insert({nativeKey, nativeMods}, q);
-    else
-        qWarning("QxtGlobalShortcut failed to register: %s", qPrintable(QKeySequence(key + mods).toString()));
+    if (!res) {
+        qCWarning(log, "Failed to register '%s' shortcut.", qPrintable(QKeySequence(key | mods).toString()));
+        return false;
+    }
 
-    return res;
+    shortcuts.insert({nativeKey, nativeMods}, q);
+
+    return true;
 }
 
 bool QxtGlobalShortcutPrivate::unsetShortcut()
 {
     Q_Q(QxtGlobalShortcut);
 
-    bool res = false;
     const quint32 nativeKey = nativeKeycode(key);
     const quint32 nativeMods = nativeModifiers(mods);
-    if (shortcuts.value({nativeKey, nativeMods}) == q)
-        res = unregisterShortcut(nativeKey, nativeMods);
 
-    if (res)
-        shortcuts.remove({nativeKey, nativeMods});
-    else
-        qWarning("QxtGlobalShortcut failed to unregister: %s", qPrintable(QKeySequence(key + mods).toString()));
+    if (shortcuts.value({nativeKey, nativeMods}) != q) {
+        qCWarning(log, "Tried to unregister unowned '%s' shortcut.", qPrintable(QKeySequence(key | mods).toString()));
+        return false;
+    }
+
+    const bool res = unregisterShortcut(nativeKey, nativeMods);
+    if (!res) {
+        qCWarning(log, "Failed to unregister '%s' shortcut.", qPrintable(QKeySequence(key | mods).toString()));
+        return false;
+    }
+
+    shortcuts.remove({nativeKey, nativeMods});
 
     key = Qt::Key(0);
     mods = Qt::KeyboardModifiers(Qt::NoModifier);
-    return res;
+
+    return true;
 }
 
 bool QxtGlobalShortcutPrivate::activateShortcut(quint32 nativeKey, quint32 nativeMods)
@@ -241,9 +237,7 @@ bool QxtGlobalShortcut::isEnabled() const
  */
 bool QxtGlobalShortcut::isSupported()
 {
-    return QGuiApplication::platformName() == QLatin1String("windows")
-            || QGuiApplication::platformName() == QLatin1String("xcb")
-            || QGuiApplication::platformName() == QLatin1String("cocoa");
+    return QxtGlobalShortcutPrivate::isSupported();
 }
 
 void QxtGlobalShortcut::setEnabled(bool enabled)

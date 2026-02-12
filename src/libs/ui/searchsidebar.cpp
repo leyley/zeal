@@ -1,24 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2019 Oleg Shparber
-** Contact: https://go.zealdocs.org/l/contact
-**
-** This file is part of Zeal.
-**
-** Zeal is free software: you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation, either version 3 of the License, or
-** (at your option) any later version.
-**
-** Zeal is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
-**
-** You should have received a copy of the GNU General Public License
-** along with Zeal. If not, see <https://www.gnu.org/licenses/>.
-**
-****************************************************************************/
+// Copyright (C) Oleg Shparber, et al. <https://zealdocs.org>
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "searchsidebar.h"
 
@@ -85,7 +66,7 @@ SearchSidebar::SearchSidebar(const SearchSidebar *other, QWidget *parent)
     connect(m_treeView, &QTreeView::clicked, this, &SearchSidebar::navigateToIndex);
 
     // Setup Alt+Up, Alt+Down, etc shortcuts.
-    const auto keyList = {Qt::Key_Up, Qt::Key_Down, Qt::Key_Left, Qt::Key_Right,
+    const auto keyList = {Qt::Key_Up, Qt::Key_Down,
                           Qt::Key_PageUp, Qt::Key_PageDown,
                           Qt::Key_Home, Qt::Key_End};
     for (const auto key : keyList) {
@@ -157,7 +138,7 @@ SearchSidebar::SearchSidebar(const SearchSidebar *other, QWidget *parent)
 
         m_treeView->selectionModel()->blockSignals(false);
 
-        // Cannot update position until layout geomentry is calculated, so set it in showEvent().
+        // Cannot update position until layout geometry is calculated, so set it in showEvent().
         m_pendingVerticalPosition = other->m_treeView->verticalScrollBar()->value();
     } else {
         m_searchModel = new Registry::SearchModel(this);
@@ -272,6 +253,11 @@ void SearchSidebar::setTreeViewModel(QAbstractItemModel *model, bool isRootDecor
 
     m_treeView->setModel(model);
     m_treeView->setRootIsDecorated(isRootDecorated);
+
+    // Hide all but the first column.
+    for (int i = 1; i < model->columnCount(); ++i) {
+        m_treeView->setColumnHidden(i, true);
+    }
 
     QItemSelectionModel *newSelectionModel = m_treeView->selectionModel();
     if (newSelectionModel != oldSelectionModel) {

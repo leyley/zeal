@@ -12,30 +12,45 @@ elseif(UNIX)
         list(APPEND QxtGlobalShortcut_SOURCES
             qxtglobalshortcut_x11.cpp
         )
+    else()
+        list(APPEND QxtGlobalShortcut_SOURCES
+            qxtglobalshortcut_noop.cpp
+        )
     endif()
 elseif(WIN32)
     list(APPEND QxtGlobalShortcut_SOURCES
         qxtglobalshortcut_win.cpp
     )
+else()
+    list(APPEND QxtGlobalShortcut_SOURCES
+        qxtglobalshortcut_noop.cpp
+    )
 endif()
 
 add_library(QxtGlobalShortcut STATIC ${QxtGlobalShortcut_SOURCES})
 
-find_package(Qt5Gui REQUIRED)
-target_link_libraries(QxtGlobalShortcut Qt5::Gui)
+find_package(Qt${QT_VERSION_MAJOR} COMPONENTS Gui REQUIRED)
+target_link_libraries(QxtGlobalShortcut PRIVATE Qt${QT_VERSION_MAJOR}::Gui)
 
 if(APPLE)
     find_library(CARBON_LIBRARY Carbon)
-    target_link_libraries(QxtGlobalShortcut ${CARBON_LIBRARY})
+    target_link_libraries(QxtGlobalShortcut PRIVATE ${CARBON_LIBRARY})
 elseif(UNIX AND X11_FOUND)
-    target_link_libraries(QxtGlobalShortcut ${X11_LIBRARIES})
+    target_link_libraries(QxtGlobalShortcut PRIVATE ${X11_LIBRARIES})
 
-    find_package(Qt5 COMPONENTS X11Extras REQUIRED)
-    target_link_libraries(QxtGlobalShortcut Qt5::X11Extras)
+    if(QT_VERSION_MAJOR EQUAL 5)
+        find_package(Qt5 COMPONENTS X11Extras REQUIRED)
+        target_link_libraries(QxtGlobalShortcut PRIVATE Qt5::X11Extras)
+    else()
+        if(Qt6Core_VERSION VERSION_GREATER_EQUAL 6.10)
+            find_package(Qt6 COMPONENTS GuiPrivate REQUIRED)
+        endif()
+        target_link_libraries(QxtGlobalShortcut PRIVATE Qt${QT_VERSION_MAJOR}::GuiPrivate)
+    endif()
 
     find_package(ECM REQUIRED NO_MODULE)
     set(CMAKE_MODULE_PATH ${ECM_FIND_MODULE_DIR})
 
     find_package(XCB COMPONENTS XCB KEYSYMS REQUIRED)
-    target_link_libraries(QxtGlobalShortcut XCB::XCB XCB::KEYSYMS)
+    target_link_libraries(QxtGlobalShortcut PRIVATE XCB::XCB XCB::KEYSYMS)
 endif()

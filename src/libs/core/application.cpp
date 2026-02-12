@@ -1,24 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2015-2016 Oleg Shparber
-** Contact: https://go.zealdocs.org/l/contact
-**
-** This file is part of Zeal.
-**
-** Zeal is free software: you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation, either version 3 of the License, or
-** (at your option) any later version.
-**
-** Zeal is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
-**
-** You should have received a copy of the GNU General Public License
-** along with Zeal. If not, see <https://www.gnu.org/licenses/>.
-**
-****************************************************************************/
+// Copyright (C) Oleg Shparber, et al. <https://zealdocs.org>
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "application.h"
 
@@ -66,6 +47,14 @@ Application::Application(QObject *parent)
     m_fileManager = new FileManager(this);
     m_httpServer = new HttpServer(this);
 
+    connect(m_networkManager, &QNetworkAccessManager::sslErrors,
+            this, [this](QNetworkReply *reply, const QList<QSslError> &errors) {
+        Q_UNUSED(errors);
+        if (m_settings->isIgnoreSslErrorsEnabled) {
+            reply->ignoreSslErrors();
+        }
+    });
+
     // Extractor setup
     m_extractorThread = new QThread(this);
     m_extractor = new Extractor();
@@ -81,15 +70,6 @@ Application::Application(QObject *parent)
     applySettings();
 
     m_mainWindow = new WidgetUi::MainWindow(this);
-
-    if (m_settings->startMinimized) {
-        if (m_settings->showSystrayIcon && m_settings->minimizeToSystray)
-            return;
-
-        m_mainWindow->showMinimized();
-    } else {
-        m_mainWindow->show();
-    }
 }
 
 Application::~Application()
@@ -114,6 +94,23 @@ Application *Application::instance()
 WidgetUi::MainWindow *Application::mainWindow() const
 {
     return m_mainWindow;
+}
+
+void Application::showMainWindow(bool forceMinimized)
+{
+    if (m_mainWindow->isVisible()) {
+        return;
+    }
+
+    if (forceMinimized || m_settings->startMinimized) {
+        if (m_settings->showSystrayIcon && m_settings->minimizeToSystray) {
+            return;
+        }
+
+        m_mainWindow->showMinimized();
+    } else {
+        m_mainWindow->show();
+    }
 }
 
 QNetworkAccessManager *Application::networkManager() const
@@ -206,7 +203,7 @@ QNetworkReply *Application::download(const QUrl &url)
 /*!
   \internal
 
-  Performs a check whether a new Zeal version is available. Setting \a quiet to true supresses
+  Performs a check whether a new Zeal version is available. Setting \a quiet to true suppresses
   error and "you are using the latest version" message boxes.
 */
 void Application::checkForUpdates(bool quiet)
@@ -245,7 +242,7 @@ void Application::checkForUpdates(bool quiet)
 void Application::applySettings()
 {
     m_docsetRegistry->setStoragePath(m_settings->docsetPath);
-    m_docsetRegistry->setFuzzySearchEnabled(m_settings->fuzzySearchEnabled);
+    m_docsetRegistry->setFuzzySearchEnabled(m_settings->isFuzzySearchEnabled);
 
     // HTTP Proxy Settings
     switch (m_settings->proxyType) {
@@ -271,11 +268,12 @@ void Application::applySettings()
 
         QNetworkProxy::setApplicationProxy(proxy);
 
-        // Force NM to pick up changes.
-        m_networkManager->clearAccessCache();
         break;
     }
     }
+
+    // Force NM to pick up changes.
+    m_networkManager->clearAccessCache();
 }
 
 QString Application::userAgent()

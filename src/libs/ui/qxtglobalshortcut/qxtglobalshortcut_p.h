@@ -1,27 +1,7 @@
+// Copyright (C) Oleg Shparber, et al. <https://zealdocs.org>
+// SPDX-License-Identifier: GPL-3.0-or-later
 /****************************************************************************
-**
-** Copyright (C) 2015-2016 Oleg Shparber
-** Copyright (C) 2013-2014 Jerzy Kozera
-** Contact: https://go.zealdocs.org/l/contact
-**
-** This file is part of Zeal.
-**
-** Zeal is free software: you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation, either version 3 of the License, or
-** (at your option) any later version.
-**
-** Zeal is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
-**
-** You should have received a copy of the GNU General Public License
-** along with Zeal. If not, see <https://www.gnu.org/licenses/>.
-**
-****************************************************************************/
-/****************************************************************************
-** Copyright (c) 2006 - 2011, the LibQxt project.
+// Copyright (C) 2006 - 2011, the LibQxt project.
 ** See the Qxt AUTHORS file for a list of authors and copyright holders.
 ** All rights reserved.
 **
@@ -56,6 +36,12 @@
 #include <QAbstractNativeEventFilter>
 #include <QHash>
 
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+#define NativeEventFilterResult long
+#else
+#define NativeEventFilterResult qintptr
+#endif
+
 class QKeySequence;
 
 class QxtGlobalShortcut;
@@ -79,8 +65,9 @@ public:
     bool setShortcut(const QKeySequence &shortcut);
     bool unsetShortcut();
 
-    bool nativeEventFilter(const QByteArray &eventType, void *message, long *result) override;
+    bool nativeEventFilter(const QByteArray &eventType, void *message, NativeEventFilterResult *result) override;
 
+    static bool isSupported();
     static bool activateShortcut(quint32 nativeKey, quint32 nativeMods);
 
 private:

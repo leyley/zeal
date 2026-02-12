@@ -1,25 +1,6 @@
-/****************************************************************************
-**
-** Copyright (C) 2015-2016 Oleg Shparber
-** Copyright (C) 2013-2014 Jerzy Kozera
-** Contact: https://go.zealdocs.org/l/contact
-**
-** This file is part of Zeal.
-**
-** Zeal is free software: you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation, either version 3 of the License, or
-** (at your option) any later version.
-**
-** Zeal is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
-**
-** You should have received a copy of the GNU General Public License
-** along with Zeal. If not, see <https://www.gnu.org/licenses/>.
-**
-****************************************************************************/
+// Copyright (C) Oleg Shparber, et al. <https://zealdocs.org>
+// Copyright (C) 2013-2014 Jerzy Kozera
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 #ifndef ZEAL_WIDGETUI_MAINWINDOW_H
 #define ZEAL_WIDGETUI_MAINWINDOW_H
@@ -28,6 +9,10 @@
 
 class QxtGlobalShortcut;
 
+class QAction;
+class QMenuBar;
+class QSplitter;
+class QStackedWidget;
 class QSystemTrayIcon;
 class QTabBar;
 
@@ -47,10 +32,6 @@ class SearchQuery;
 } //namespace Registry
 
 namespace WidgetUi {
-
-namespace Ui {
-class MainWindow;
-} // namespace Ui
 
 class BrowserTab;
 class SidebarViewProvider;
@@ -85,6 +66,8 @@ private slots:
     void duplicateTab(int index);
 
 private:
+    void setupMainMenu();
+    void setupShortcuts();
     void setupTabBar();
 
     void addTab(BrowserTab *tab, int index = -1);
@@ -96,21 +79,28 @@ private:
 
     void syncTabState(BrowserTab *tab);
 
-    Ui::MainWindow *ui = nullptr;
     Core::Application *m_application = nullptr;
     Core::Settings *m_settings = nullptr;
 
     Browser::WebBridge *m_webBridge = nullptr;
 
-    QMenu *m_backMenu = nullptr;
-    QMenu *m_forwardMenu = nullptr;
-
     QxtGlobalShortcut *m_globalShortcut = nullptr;
 
+    QMenuBar *m_menuBar = nullptr;
     QTabBar *m_tabBar = nullptr;
 
+    QSplitter *m_splitter = nullptr;
+    QStackedWidget *m_webViewStack = nullptr;
+
+    // TODO: Replace with proper action manager.
+    QAction *m_quitAction = nullptr;
+    QAction *m_showDocsetManagerAction = nullptr;
+    QAction *m_showPreferencesAction = nullptr;
+#ifndef Q_OS_MACOS
+    QAction *m_showMenuBarAction = nullptr;
+#endif
+
     friend class SidebarViewProvider;
-    SidebarViewProvider *m_sbViewProvider = nullptr;
 
     QSystemTrayIcon *m_trayIcon = nullptr;
 };

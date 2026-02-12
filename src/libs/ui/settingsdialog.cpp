@@ -1,36 +1,19 @@
-/****************************************************************************
-**
-** Copyright (C) 2015-2016 Oleg Shparber
-** Copyright (C) 2013-2014 Jerzy Kozera
-** Contact: https://go.zealdocs.org/l/contact
-**
-** This file is part of Zeal.
-**
-** Zeal is free software: you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation, either version 3 of the License, or
-** (at your option) any later version.
-**
-** Zeal is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
-**
-** You should have received a copy of the GNU General Public License
-** along with Zeal. If not, see <https://www.gnu.org/licenses/>.
-**
-****************************************************************************/
+// Copyright (C) Oleg Shparber, et al. <https://zealdocs.org>
+// Copyright (C) 2013-2014 Jerzy Kozera
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "settingsdialog.h"
 #include "ui_settingsdialog.h"
 
 #include <qxtglobalshortcut/qxtglobalshortcut.h>
 
+#include <browser/settings.h>
 #include <core/application.h>
 #include <core/settings.h>
 
 #include <QDir>
 #include <QFileDialog>
+#include <QWebEngineProfile>
 #include <QWebEngineSettings>
 
 using namespace Zeal;
@@ -78,9 +61,12 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     setTabOrder(ui->fontSizeComboBox, ui->serifFontComboBox);
 
     // Disable global shortcut settings if not supported.
-    ui->globalHotKeyGroupBox->setEnabled(QxtGlobalShortcut::isSupported());
+    if (!QxtGlobalShortcut::isSupported()) {
+        ui->globalHotKeyGroupBox->setEnabled(false);
+        ui->globalHotKeyGroupBox->setToolTip(tr("Global shortcuts are not supported on the current platform."));
+    }
 
-    QWebEngineSettings *webSettings = QWebEngineSettings::defaultSettings();
+    QWebEngineSettings *webSettings = Browser::Settings::defaultProfile()->settings();
 
     // Avoid casting in each connect.
     auto currentIndexChangedSignal
@@ -185,7 +171,7 @@ void SettingsDialog::loadSettings()
     ui->openNewTabAfterActive->setChecked(settings->openNewTabAfterActive);
 
     // Search Tab
-    ui->fuzzySearchCheckBox->setChecked(settings->fuzzySearchEnabled);
+    ui->fuzzySearchCheckBox->setChecked(settings->isFuzzySearchEnabled);
 
     // Content Tab
     for (int i = 0; i < ui->defaultFontComboBox->count(); ++i) {
@@ -202,8 +188,19 @@ void SettingsDialog::loadSettings()
     ui->fixedFontSizeComboBox->setCurrentText(QString::number(settings->defaultFixedFontSize));
     ui->minFontSizeComboBox->setCurrentText(QString::number(settings->minimumFontSize));
 
-    ui->darkModeCheckBox->setChecked(settings->darkModeEnabled);
-    ui->highlightOnNavigateCheckBox->setChecked(settings->highlightOnNavigateEnabled);
+    switch (settings->contentAppearance) {
+    case Core::Settings::ContentAppearance::Automatic:
+        ui->appearanceAutoRadioButton->setChecked(true);
+        break;
+    case Core::Settings::ContentAppearance::Light:
+        ui->appearanceLightRadioButton->setChecked(true);
+        break;
+    case Core::Settings::ContentAppearance::Dark:
+        ui->appearanceDarkRadioButton->setChecked(true);
+        break;
+    }
+
+    ui->highlightOnNavigateCheckBox->setChecked(settings->isHighlightOnNavigateEnabled);
     ui->customCssFileEdit->setText(QDir::toNativeSeparators(settings->customCssFile));
 
     switch (settings->externalLinkPolicy) {
@@ -243,6 +240,8 @@ void SettingsDialog::loadSettings()
     ui->proxyRequiresAuthCheckBox->setChecked(settings->proxyAuthenticate);
     ui->proxyUsernameEdit->setText(settings->proxyUserName);
     ui->proxyPasswordEdit->setText(settings->proxyPassword);
+
+    ui->ignoreSslErrorsCheckBox->setChecked(settings->isIgnoreSslErrorsEnabled);
 }
 
 void SettingsDialog::saveSettings()
@@ -265,9 +264,14 @@ void SettingsDialog::saveSettings()
     settings->openNewTabAfterActive = ui->openNewTabAfterActive->isChecked();
 
     // Search Tab
-    settings->fuzzySearchEnabled = ui->fuzzySearchCheckBox->isChecked();
+    settings->isFuzzySearchEnabled = ui->fuzzySearchCheckBox->isChecked();
 
     // Content Tab
+#if QT_VERSION < QT_VERSION_CHECK(6, 7, 0)
+    // Applying dark mode requires restart.
+    ui->appearanceLabel->setText(tr("Appearance (requires restart):"));
+#endif
+
     settings->defaultFontFamily = ui->defaultFontComboBox->currentData().toString();
     settings->serifFontFamily = ui->serifFontComboBox->currentText();
     settings->sansSerifFontFamily = ui->sansSerifFontComboBox->currentText();
@@ -277,8 +281,15 @@ void SettingsDialog::saveSettings()
     settings->defaultFixedFontSize = ui->fixedFontSizeComboBox->currentData().toInt();
     settings->minimumFontSize = ui->minFontSizeComboBox->currentData().toInt();
 
-    settings->darkModeEnabled = ui->darkModeCheckBox->isChecked();
-    settings->highlightOnNavigateEnabled = ui->highlightOnNavigateCheckBox->isChecked();
+    if (ui->appearanceAutoRadioButton->isChecked()) {
+        settings->contentAppearance = Core::Settings::ContentAppearance::Automatic;
+    } else if (ui->appearanceLightRadioButton->isChecked()) {
+        settings->contentAppearance = Core::Settings::ContentAppearance::Light;
+    } else if (ui->appearanceDarkRadioButton->isChecked()) {
+        settings->contentAppearance = Core::Settings::ContentAppearance::Dark;
+    }
+
+    settings->isHighlightOnNavigateEnabled = ui->highlightOnNavigateCheckBox->isChecked();
     settings->customCssFile = QDir::fromNativeSeparators(ui->customCssFileEdit->text());
 
     if (ui->radioExternalLinkAsk->isChecked()) {
@@ -310,6 +321,8 @@ void SettingsDialog::saveSettings()
     settings->proxyAuthenticate = ui->proxyRequiresAuthCheckBox->isChecked();
     settings->proxyUserName = ui->proxyUsernameEdit->text();
     settings->proxyPassword = ui->proxyPasswordEdit->text();
+
+    settings->isIgnoreSslErrorsEnabled = ui->ignoreSslErrorsCheckBox->isChecked();
 
     settings->save();
 }

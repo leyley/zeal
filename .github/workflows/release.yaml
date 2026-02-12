@@ -1,0 +1,219 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+# Required for creating GitHub release.
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    name: ${{ matrix.config.name }}
+    runs-on: ${{ matrix.config.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - name: Windows Server 2022 / Qt 6
+            os: windows-2022
+            arch: win64_msvc2022_64
+            qt_modules: >-
+              qtpositioning
+              qtwebchannel
+              qtwebengine
+            qt_version: "6.9.3"
+            configurePreset: ninja-multi-vcpkg
+            buildPreset: ninja-multi-vcpkg-release
+          - name: Windows Server 2022 / Qt 6 / Portable
+            os: windows-2022
+            arch: win64_msvc2022_64
+            qt_modules: >-
+              qtpositioning
+              qtwebchannel
+              qtwebengine
+            qt_version: "6.9.3"
+            configurePreset: ninja-multi-vcpkg-portable
+            buildPreset: ninja-multi-vcpkg-portable-release
+
+    env:
+      _vcpkg_binary_cache: ${{ github.workspace }}/.vcpkg-cache
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/.vcpkg-cache,readwrite
+      VCPKG_BUILD_TYPE: release
+      VCPKG_DEFAULT_TRIPLET: x64-windows
+      ZEAL_RELEASE_BUILD: ON
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      # Workaround for https://github.com/lukka/run-vcpkg/issues/251.
+      - name: Restore vcpkg Cache
+        id: vcpkg-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env._vcpkg_binary_cache }}
+          key: vcpkg-${{ matrix.config.os }}-${{ matrix.config.buildPreset }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: vcpkg-${{ matrix.config.os }}-${{ matrix.config.buildPreset }}-
+
+      - name: Prepare vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: ${{ github.workspace }}/.vcpkg
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          arch: ${{ matrix.config.arch }}
+          modules: ${{ matrix.config.qt_modules }}
+          version: ${{ matrix.config.qt_version }}
+          cache: true
+
+      - name: Configure & Build
+        uses: lukka/run-cmake@v10
+        with:
+          configurePreset: ${{ matrix.config.configurePreset }}
+          buildPreset: ${{ matrix.config.buildPreset }}
+
+      - name: Save vcpkg Cache
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env._vcpkg_binary_cache }}
+          key: vcpkg-${{ matrix.config.os }}-${{ matrix.config.buildPreset }}-${{ hashFiles('vcpkg.json') }}
+
+      - name: Retrieve Application Version
+        run: |
+          $zeal_version = Get-Content build/${{ matrix.config.configurePreset }}/zeal_version
+          Write-Output "Zeal Version: $zeal_version"
+          "ZEAL_VERSION=$zeal_version" >> $env:GITHUB_ENV
+
+      - name: Package
+        run: cmake --build build --preset ${{ matrix.config.buildPreset }} --target package
+        env:
+          CODESIGN_CERTIFICATE_BASE64: ${{ secrets.CODESIGN_CERTIFICATE_BASE64 }}
+          CODESIGN_PASSWORD: ${{ secrets.CODESIGN_PASSWORD }}
+
+      - name: Update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          # Only upload the following artifacts:
+          # - Portable 7-Zip and ZIP packages.
+          # - Non-portable MSI package.
+          files: |
+            build/${{ matrix.config.configurePreset }}/zeal-${{ env.ZEAL_VERSION }}-portable-windows-x64.*
+            build/${{ matrix.config.configurePreset }}/zeal-${{ env.ZEAL_VERSION }}-windows-x64.msi*
+
+  build-appimage:
+    name: AppImage
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Build AppImage
+        uses: ./.github/workflows/appimage/
+        with:
+          recipe: pkg/appimage/appimage-amd64.yaml
+          apt_dependencies: >-
+            appstream
+            build-essential
+            cmake extra-cmake-modules
+            libayatana-appindicator3-dev
+            libarchive-dev
+            libqt5x11extras5-dev
+            libsqlite3-dev
+            libxcb-keysyms1-dev
+            ninja-build
+            qtbase5-dev
+            qtwebengine5-dev
+
+      - name: Generate Digest Files
+        run: for file in zeal-*.AppImage*; do sha256sum $file > $file.sha256; done
+
+      - name: Update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          fail_on_unmatched_files: true
+          files: |
+            zeal-*.AppImage*
+
+  build-ubuntu:
+    name: ${{ matrix.config.name }}
+    runs-on: ${{ matrix.config.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - name: Ubuntu 24.04 / Source
+            os: ubuntu-24.04
+            qt_packages: >-
+              libgl1-mesa-dev
+              libqt6opengl6-dev
+              qt6-base-private-dev
+              qt6-webengine-dev
+              qt6-webengine-dev-tools
+            configurePreset: ninja-multi
+            buildPreset: ninja-multi-release
+
+    env:
+      ZEAL_RELEASE_BUILD: ON
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get -y -qq update
+          sudo apt-get -y -qq --no-install-recommends install \
+            cmake \
+            extra-cmake-modules \
+            libarchive-dev \
+            libsqlite3-dev \
+            libvulkan-dev \
+            libxcb-keysyms1-dev \
+            ninja-build \
+            ${{ matrix.config.qt_packages }}
+
+      - name: Configure & Package Source
+        uses: lukka/run-cmake@v10
+        with:
+          configurePreset: ${{ matrix.config.configurePreset }}
+          buildPreset: ${{ matrix.config.buildPreset }}
+          buildPresetAdditionalArgs: "['--target package_source']"
+
+      - name: Generate Changelog
+        uses: orhun/git-cliff-action@v4
+        id: git-cliff
+        with:
+          args: --latest
+          config: .github/workflows/release/cliff.toml
+        env:
+          GITHUB_REPO: ${{ github.repository }}
+
+      - name: Update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          fail_on_unmatched_files: true
+          body: ${{ steps.git-cliff.outputs.content }}
+          # Only upload the following artifacts:
+          # - Source packages.
+          files: |
+            build/${{ matrix.config.configurePreset }}/zeal-*.*

@@ -1,24 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2020 Oleg Shparber
-** Contact: https://go.zealdocs.org/l/contact
-**
-** This file is part of Zeal.
-**
-** Zeal is free software: you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation, either version 3 of the License, or
-** (at your option) any later version.
-**
-** Zeal is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
-**
-** You should have received a copy of the GNU General Public License
-** along with Zeal. If not, see <https://www.gnu.org/licenses/>.
-**
-****************************************************************************/
+// Copyright (C) Oleg Shparber, et al. <https://zealdocs.org>
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "settings.h"
 
@@ -27,18 +8,20 @@
 #include <core/settings.h>
 
 #include <QFileInfo>
+#include <QLoggingCategory>
 #include <QWebEngineProfile>
 #include <QWebEngineSettings>
 #include <QWebEngineScript>
 #include <QWebEngineScriptCollection>
 
 namespace {
-constexpr char DarkModeCssUrl[] = "qrc:///browser/assets/css/darkmode.css";
-constexpr char HighlightOnNavigateCssUrl[] = "qrc:///browser/assets/css/highlight.css";
+constexpr char HighlightOnNavigateCssPath[] = ":/browser/assets/css/highlight.css";
 }
 
 using namespace Zeal;
 using namespace Zeal::Browser;
+
+static Q_LOGGING_CATEGORY(log, "zeal.browser.settings")
 
 QWebEngineProfile *Settings::m_webProfile = nullptr;
 
@@ -48,15 +31,16 @@ Settings::Settings(Core::Settings *appSettings, QObject *parent)
 {
     Q_ASSERT(!m_webProfile);
 
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     // Create a new off-the-record profile.
     m_webProfile = new QWebEngineProfile(this);
+#else
+    // Default profile for Qt 6 is off-the-record.
+    m_webProfile = QWebEngineProfile::defaultProfile();
+#endif
 
     // Setup URL interceptor.
-#if QT_VERSION >= QT_VERSION_CHECK(5, 13, 0)
     m_webProfile->setUrlRequestInterceptor(new UrlRequestInterceptor(this));
-#else
-    m_webProfile->setRequestInterceptor(new UrlRequestInterceptor(this));
-#endif
 
     // Listen to settings changes.
     connect(m_appSettings, &Core::Settings::updated, this, &Settings::applySettings);
@@ -68,16 +52,18 @@ void Settings::applySettings()
     m_webProfile->settings()->setAttribute(QWebEngineSettings::ScrollAnimatorEnabled,
                                            m_appSettings->isSmoothScrollingEnabled);
 
+    // Qt 6.7+ does not require restart to enable dark mode.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+    m_webProfile->settings()->setAttribute(QWebEngineSettings::ForceDarkMode,
+                                           m_appSettings->isDarkModeEnabled());
+#endif
+
     // Apply custom CSS.
     // TODO: Apply to all open pages.
     m_webProfile->scripts()->clear(); // Remove all scripts first.
 
-    if (m_appSettings->darkModeEnabled) {
-        setCustomStyleSheet(QStringLiteral("_zeal_darkstylesheet"), DarkModeCssUrl);
-    }
-
-    if (m_appSettings->highlightOnNavigateEnabled) {
-        setCustomStyleSheet(QStringLiteral("_zeal_highlightstylesheet"), HighlightOnNavigateCssUrl);
+    if (m_appSettings->isHighlightOnNavigateEnabled) {
+        setCustomStyleSheet(QStringLiteral("_zeal_highlightstylesheet"), HighlightOnNavigateCssPath);
     }
 
     if (QFileInfo::exists(m_appSettings->customCssFile)) {
@@ -91,23 +77,38 @@ QWebEngineProfile *Settings::defaultProfile()
     return m_webProfile;
 }
 
-void Settings::setCustomStyleSheet(const QString &name, const QString &cssUrl)
+void Settings::setCustomStyleSheet(const QString &name, const QString &path)
 {
-    QString cssInjectCode = QLatin1String("(function() {"
-                "let head = document.getElementsByTagName('head')[0];"
-                "if (!head) { console.error('Cannot set custom stylesheet.'); return; }"
-                "let link = document.createElement('link');"
-                "link.rel = 'stylesheet';"
-                "link.type = 'text/css';"
-                "link.href = '%1';"
-                "link.media = 'all';"
-                "head.appendChild(link);"
-                "})()");
+    // Read the stylesheet file content.
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        qCWarning(log, "Failed to read stylesheet file '%s'.", qPrintable(path));
+        return;
+    }
+
+    QString stylesheet = QString::fromUtf8(file.readAll());
+    file.close();
+
+    // Escape single quotes and newlines for JavaScript string literal.
+    stylesheet.replace(QLatin1String("'"), QLatin1String("\\'"));
+    stylesheet.replace(QLatin1String("\n"), QLatin1String("\\n"));
+
+    QString cssInjectCode = QLatin1String(
+        "(() => {"
+            "const head = document.getElementsByTagName('head')[0];"
+            "if (!head) { console.error('Cannot set custom stylesheet.'); return; }"
+            "const stylesheet = document.createElement('style');"
+            "stylesheet.setAttribute('type', 'text/css');"
+            "stylesheet.textContent = '%1';"
+            "head.appendChild(stylesheet);"
+        "})()"
+    );
 
     QWebEngineScript script;
     script.setName(name);
-    script.setSourceCode(cssInjectCode.arg(cssUrl));
+    script.setSourceCode(cssInjectCode.arg(stylesheet));
     script.setInjectionPoint(QWebEngineScript::DocumentReady);
     script.setRunsOnSubFrames(true);
+    script.setWorldId(QWebEngineScript::ApplicationWorld);
     m_webProfile->scripts()->insert(script);
 }

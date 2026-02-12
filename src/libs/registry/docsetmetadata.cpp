@@ -1,25 +1,6 @@
-/****************************************************************************
-**
-** Copyright (C) 2015-2016 Oleg Shparber
-** Copyright (C) 2013-2014 Jerzy Kozera
-** Contact: https://go.zealdocs.org/l/contact
-**
-** This file is part of Zeal.
-**
-** Zeal is free software: you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation, either version 3 of the License, or
-** (at your option) any later version.
-**
-** Zeal is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
-**
-** You should have received a copy of the GNU General Public License
-** along with Zeal. If not, see <https://www.gnu.org/licenses/>.
-**
-****************************************************************************/
+// Copyright (C) Oleg Shparber, et al. <https://zealdocs.org>
+// Copyright (C) 2013-2014 Jerzy Kozera
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "docsetmetadata.h"
 
@@ -27,9 +8,7 @@
 #include <QGuiApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
-#if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
 #include <QRandomGenerator>
-#endif
 #include <QVariant>
 #include <QXmlStreamReader>
 
@@ -59,7 +38,9 @@ DocsetMetadata::DocsetMetadata(const QJsonObject &jsonObject)
         m_versions << vv.toString();
     }
 
-    m_revision = jsonObject[QStringLiteral("revision")].toString();
+    // Unfortunately, API returns revision as a string, so it needs to be converted to integer
+    // for comparison to work properly.
+    m_revision = jsonObject[QStringLiteral("revision")].toString().toInt();
 
     m_feedUrl = QUrl(jsonObject[QStringLiteral("feed_url")].toString());
 
@@ -87,15 +68,15 @@ void DocsetMetadata::save(const QString &path, const QString &version)
     if (!version.isEmpty())
         jsonObject[QStringLiteral("version")] = version;
 
-    if (version == latestVersion() && !m_revision.isEmpty())
-        jsonObject[QStringLiteral("revision")] = m_revision;
+    if (version == latestVersion() && m_revision > 0)
+        jsonObject[QStringLiteral("revision")] = QString::number(m_revision);
 
     if (!m_feedUrl.isEmpty())
         jsonObject[QStringLiteral("feed_url")] = m_feedUrl.toString();
 
     if (!m_urls.isEmpty()) {
         QJsonArray urls;
-        for (const QUrl &url : qAsConst(m_urls)) {
+        for (const QUrl &url : std::as_const(m_urls)) {
             urls.append(url.toString());
         }
 
@@ -155,7 +136,7 @@ QString DocsetMetadata::latestVersion() const
     return m_versions.isEmpty() ? QString() : m_versions.first();
 }
 
-QString DocsetMetadata::revision() const
+int DocsetMetadata::revision() const
 {
     return m_revision;
 }
@@ -167,11 +148,7 @@ QUrl DocsetMetadata::feedUrl() const
 
 QUrl DocsetMetadata::url() const
 {
-#if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
     return m_urls.at(QRandomGenerator::global()->bounded(m_urls.size()));
-#else
-    return m_urls.at(qrand() % m_urls.size());
-#endif
 }
 
 QList<QUrl> DocsetMetadata::urls() const

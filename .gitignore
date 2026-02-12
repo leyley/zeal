@@ -1,25 +1,19 @@
 # C++ objects and libs
-*.slo
-*.lo
-*.o
 *.a
-*.la
-*.lai
-*.so
 *.dll
 *.dylib
-
-# Qt Creator
-*.autosave
-
-# Qt Ctreator QML
-*.qmlproject.user
-*.qmlproject.user.*
+*.la
+*.lai
+*.lo
+*.o
+*.slo
+*.so
 
 # CMake
-CMakeLists.txt.user
-build/
 build.*/
+build/
+CMakeLists.txt.user
+CMakeUserPresets.json
 
 # AppImage Builder
 *.AppImage
@@ -31,6 +25,9 @@ squashfs-root/
 *.msi
 *.wixobj
 *.wixpdb
+
+# Qt Creator
+*.autosave
 
 # VS Code
 .vscode/
